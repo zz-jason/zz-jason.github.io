@@ -38,3 +38,5 @@ TiDB > EXPLAIN SELECT a.col2, a.col3, a.col4, a.col5 FROM tblA a, tblB b WHERE a
 上面这条 SQL 来自 issue [#3914](https://github.com/pingcap/tidb/pull/3914)，里面有完整的建表语句，感兴趣的读者可以试试
 
 大家可能在上面那个 issue 的 comment 中发现我贴的 dot 图了。这也是 explain 未来可以展示的结果之一，比如可以丰富 explain 的语法，以后直接 `explain format=dot select ...` 得到 plan 对应的 dot 文件的内容，然后上 [webgraphviz](http://www.webgraphviz.com/) 生成 dot 图；或者把结果存文件，用本机安装的 dot 命令生成 dot 图（`dot -T png -O xxx.dot`）
+
+
