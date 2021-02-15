@@ -33,7 +33,7 @@ Params:
   showtoc: true
   tocopen: false
   comments: true
-  defaultTheme: dark
+  defaultTheme: light
   disableThemeToggle: true
   homeInfoParams:
     Title: Hi there 👋
