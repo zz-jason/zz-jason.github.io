@@ -12,10 +12,14 @@ menu:
       name: Home
       url: /
       weight: 1
+    - identifier: categories
+      name: Categories
+      url: /categories/
+      weight: 2
     - identifier: archives
       name: Archives
       url: /posts/
-      weight: 2
+      weight: 3
     - identifier: about
       name: About
       url: /about/
@@ -27,17 +31,15 @@ Author:
 
 Params:
   env: 'production'
-  ShowReadingTime: true
-  ShowShareButtons: true
-  author: 'Jian Zhang'
-  showtoc: true
-  tocopen: false
-  comments: true
+
+  # for the theme
   defaultTheme: light
   disableThemeToggle: true
+
+  # for homepage
   homeInfoParams:
     Title: Hi there 👋
-    Content: "Welcome to my blog, you can also find me in the following social icons:"
+    Content: "Welcome to my blog, you can also find me in the following social medias:"
   socialIcons:
     - name: twitter
       url: "https://twitter.com/zhangjian1012"
@@ -45,3 +47,14 @@ Params:
       url: "https://www.linkedin.com/in/zhangjian1012/"
     - name: github
       url: "https://github.com/zz-jason"
+    - name: email
+      url: "mailto:zjsariel@gmail.com"
+
+  # for pages
+  ShowReadingTime: true
+  ShowShareButtons: true
+  ShowPostNavLinks: true
+  author: 'Jian Zhang'
+  showtoc: true
+  tocopen: false
+  comments: true

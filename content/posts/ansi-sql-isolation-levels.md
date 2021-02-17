@@ -1,7 +1,7 @@
 ---
 title: "A Critique of ANSI SQL Isolation Levels 阅读笔记"
 date: 2020-09-12T16:13:29Z
-draft: false
+categories: ["Technology"]
 ---
 
 ## 前言
