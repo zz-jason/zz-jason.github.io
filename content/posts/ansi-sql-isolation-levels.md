@@ -1,5 +1,5 @@
 ---
-title: "A Critique of ANSI SQL Isolation Levels 阅读笔记"
+title: "论文阅读：《A Critique of ANSI SQL Isolation Levels》"
 date: 2020-09-12T16:13:29Z
 categories: ["Technology"]
 ---
