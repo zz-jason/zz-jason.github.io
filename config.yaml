@@ -1,5 +1,5 @@
 baseURL: 'https://zz-jason.github.io/'
-title: Jian Zhang's Blog
+title: Jian Zhang
 paginate: 5
 enableEmoji: true
 hasCJKLanguage: true
@@ -26,7 +26,7 @@ menu:
       weight: 4
 
 Author:
-  name: Jian Zhang
+  name: Jian
   avatar: /img/avatar.png
 
 Params:
@@ -38,23 +38,23 @@ Params:
 
   # for homepage
   homeInfoParams:
-    Title: Hi there 👋
-    Content: "Welcome to my blog, you can also find me in the following social medias:"
-  socialIcons:
-    - name: twitter
-      url: "https://twitter.com/zhangjian1012"
-    - name: linkedin
-      url: "https://www.linkedin.com/in/zhangjian1012/"
-    - name: github
-      url: "https://github.com/zz-jason"
-    - name: email
-      url: "mailto:zjsariel@gmail.com"
+    # Title:
+    Content: "Why did you want to climb Mount Everest?\n\nBecause it’s there."
+    # socialIcons:
+    #   - name: twitter
+    #     url: "https://twitter.com/zhangjian1012"
+    #   - name: linkedin
+    #     url: "https://www.linkedin.com/in/zhangjian1012/"
+    #   - name: github
+    #     url: "https://github.com/zz-jason"
+    #   - name: email
+    #     url: "mailto:zjsariel@gmail.com"
 
   # for pages
   ShowReadingTime: true
   ShowShareButtons: true
   ShowPostNavLinks: true
-  author: 'Jian Zhang'
+  author: 'Jian'
   showtoc: true
   tocopen: false
   comments: true

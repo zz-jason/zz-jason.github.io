@@ -2,7 +2,7 @@
 title: "2016 年乌孙古道徒步游记"
 date: 2021-05-09T13:32:49Z
 categories: ["Hiking"]
-draft: false
+draft: true
 ---
 
 回顾下 5 年前的游记，虽然时间久远，但因为是人生第一次重装旅行，
