@@ -5,9 +5,7 @@ https://zz-jason.github.io is my personal blog, it's a Hugo generated static sit
 ## Download the source and submodules
 
 ```sh
-git clone https://github.com/zz-jason/zz-jason.github.io.git
-cd zz-jason.github.io
-git submodule update --init
+git clone --recursive https://github.com/zz-jason/zz-jason.github.io.git
 ```
 
 ## New post
