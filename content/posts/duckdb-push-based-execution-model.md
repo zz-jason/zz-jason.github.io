@@ -1,36 +1,41 @@
 ---
 title: "[DuckDB] Push-Based Execution Model"
-date: 2022-11-13T08:36:00+08:00
-categories: ["Technology"]
+date: 2022-11-14T08:36:00+08:00
+categories: ["DuckDB"]
 draft: false
 ---
-## 背景
+## 1. 背景
 
-DuckDB 是我非常喜欢的一个数据库，它基于 [libpg_query](https://github.com/duckdb/duckdb/tree/master/third_party/libpg_query) 实现了 SQL Parser，语法和 PostgreSQL 一致，内嵌 sqlite 的 REPL CLI，编译好 duckdb 后可直接运行 CLI 交互式输入 SQL 得到结果。架构简单、分析性能优秀、代码干净好读，极易上手。
+DuckDB 是我非常喜欢的一个数据库，它基于 [libpg_query](https://github.com/duckdb/duckdb/tree/master/third_party/libpg_query) 实现了 SQL Parser，语法和 PostgreSQL 一致，内嵌 SQLite 的 REPL CLI，编译好后可直接运行 CLI 交互式输入 SQL 得到结果。架构简单、分析性能优秀、代码干净好读，极易上手。
 
 10 月初偶然间翻看 duckdb 的代码，发现他的执行引擎和计算调度采用了类似 Hyper 在《[Morsel-Driven Parallelism: A NUMA-Aware Query Evaluation Framework for the Many-Core Age](https://15721.courses.cs.cmu.edu/spring2016/papers/p743-leis.pdf)》中提出的 Morsel-Driven 的方式，实现了 push-based execution model，它的 pipeline breaker 语义和也 Hyper 在《[Efficiently Compiling Efficient Query Plans for Modern Hardware](https://www.vldb.org/pvldb/vol4/p539-neumann.pdf)》 中定义的一致，不同的是 Hyper 期望通过 LLVM JIT 的方式对数据一行一行计算使其尽量保存在寄存器中，DuckDB 采用向量化使一批数据尽可能保存在 CPU Cache 中。
 
-之前做 TiDB 时研究过很多 Hyper 和 Vectorize 的论文，也在内部做过几次分享，一直希望实现一个简单的 demo 验证下效果，正好 DuckDB 采用了类似实现，这就勾起了我浓烈的好奇心。因此利用周末时间研究了下 DuckDB 是如何实现 push-based execution model 的，这里分享给大家，希望帮助到同样感兴趣的读者。
+之前做 TiDB 时研究过很多 Hyper 和 Vectorize 的论文，也做过几次分享，一直希望实现一个简单 demo 验证下效果，正好 DuckDB 采用了类似实现，这就勾起了我浓烈的好奇心。因此利用周末时间研究了下 DuckDB 是如何实现 push-based execution model 的，这里分享给大家，希望帮助到同样感兴趣的朋友们。
 
-## 执行框架概览
+## 2. 执行框架概览
 
-DuckDB 启动时会创建一个全局的 TaskScheduler，启动 nproc-1（main 函数）个后台线程。这些后台线程启动后会不停地尝试从位于 TaskScheduler 的一个公共 Task 队列中取出一个 Task 并执行。DuckDB 中 Query 的执行就是靠这个后台线程池完成的。
+DuckDB 启动时会创建一个全局的 TaskScheduler，启动 nproc-1（main 函数）个后台线程。这些后台线程启动后会不停地从位于 TaskScheduler 的 Task 队列中取出和执行 Task。DuckDB 通过这个后台线程池和公共 Task 队列完成了 Query 的并发执行。
 
-要在这个框架下完成 Query 执行，DuckDB 基于 Query 的物理执行计划 PhysicalOperator DAG 构造了 Pipeline DAG。每个 Pipeline 代表了物理执行计划中一段连续的 PhysicalOperator 算子，由 source、operators 和 sink 构成。当且仅当 Pipeline 的所有 dependency 都执行完后，该 Pipeline 才可被执行。Pipeline 的 sink 代表了需要消费掉所有输入数据才能对外返回结果的 PhysicalOperator。Pipeline DAG 和 PhysicalOperator DAG 一样，可以看做是另一种视角下的物理执行计划。
+DuckDB 基于 Query 的物理执行计划 PhysicalOperator tree 构造了 Pipeline DAG。每个 Pipeline 代表了物理执行计划中一段连续的 PhysicalOperator 算子，由 source、operators 和 sink 构成。当且仅当 Pipeline 的所有 dependency 都执行完后，该 Pipeline 才可被执行。Pipeline 的 sink 代表了需要消费掉所有输入数据才能对外返回结果的 PhysicalOperator。Pipeline DAG 可以看做是另一种视角下的物理执行计划。
 
-每个 Pipeline 可以都同时被多个线程并发执行，Pipeline 的 source 和 sink 需要是并发安全的。每个 Pipeline 的执行都由对应的 PipelineExecutor 完成。为了让 PipelineExecutor 能够被线程池中后台线程执行，每个 PipelineExecutor 都被封装在了一个 ExecutorTask 中。这样后台线程只要执行完 TaskScheduler 队列中的一个 ExecutorTask 即可完成某个 Pipeline 其中一个并发任务。
+DuckDB 为每个 Pipeline 构造多个 ExecutorTask 使得 Pipeline 可以被多个线程并发执行，Pipeline 的 source 和 sink 需要是并发安全的。后台线程取得 ExecutorTask 后会通过其中的 PipelineExecutor 执行 Pipeline，当执行完一个 ExecutorTask 后，Pipeline 的一个并发任务也就执行完了。
 
-为了正确调度和执行 Pipeline DAG 中所有的 Pipeline，并且考虑到每个 Pipeline 都可能有多个并发的 ExecutorTask，我们需要能够及时知道某个 Pipeline 的所有并发是否都执行完毕，并且在其父亲 Pipeline 的所有依赖都被执行完后及时调度父亲 Pipeline 的所有 ExecutorTask，DuckDB 采用 Event 来生成和调度对应的 ExecutorTask。
+为了正确调度和执行 Pipeline DAG 中所有的 Pipeline 和它们对应的 ExecutorTask，我们需要能够及时知道某个 Pipeline 的所有并发是否都执行完毕，在其父亲 Pipeline 的所有依赖都被执行完后及时调度父亲 Pipeline 的所有 ExecutorTask，DuckDB 采用了 Event 来生成和调度对应的 ExecutorTask。
 
-每个 Pipeline 的 Event 都记录了需要的总并发数和完成的并发数。在构造 Pipeline DAG 后，DuckDB 会为其构造一个对应的 Event DAG，Pipeline 的调度和执行就是通过 Event 来完成的。每当一个 ExecutorTask 完成，该 Event 的完成并发数就会加 1，当该 Pipeline 的所有 ExecutorTask 都完成后，Event 中的总并发数和已完成并发数相等，标志着该 Event 也完成，该 Event 会通知其父亲 Event，父亲 Event 一旦检测到所有 dependency Event 都执行完，就会调度自己的 ExecutorTask，从而驱动后续的 Pipeilne 计算。
+每个 Pipeline 的 Event 都记录了需要执行的总并发数和完成的并发数。在构造 Pipeline DAG 后，DuckDB 会为其构造一个对应的 Event DAG，Pipeline 通过 Event 完成了 ExecutorTask 的调度和执行。每当一个 ExecutorTask 完成，该 Event 的完成并发数就会加 1，当该 Pipeline 的所有 ExecutorTask 都完成后，Event 中的总并发数和已完成并发数相等，标志着该 Event 也完成，该 Event 会通知其父亲 Event，父亲 Event 一旦检测到所有 dependency Event 都执行完，就会调度自己的 ExecutorTask，从而驱动后续的 Pipeilne 计算。
 
-ExecutorTask 中的 Pipeline 是以 push 的方式执行的：先从 Pipeline 的 source 获取一批数据，然后将该批数据依次的通过所有中间的 operators 计算，最终由 sink 完成这一批初始数据的最终计算。典型的 sink 就是构造 hash table 了：当前 Pipeline 的所有 ExecutorTask 执行完后，最终的 hash table 也构造好了。
+ExecutorTask 中的 Pipeline 是以 push 的方式执行的：先从 Pipeline 的 source 获取一批数据，然后将该批数据依次的通过所有中间的 operators 计算，最终由 sink 完成这一批初始数据的最终计算。典型的 sink 比如构造 hash table：当前 Pipeline 的所有 ExecutorTask 执行完后，最终的 hash table 才构造好，才能用来 probe 产生结果。
 
-为了返回结果给客户端，当前 Query 的主线程会不断调用 root PipelineExecutor 的 pull 接口。需要注意的是，这个接口名字的 pull 指的仅仅是从最顶层 Pipeline 拿结果数据，在计算顶层 Pipeline 的时候仍然是从 source 到最后一个计算 PhysicalOperator push 计算过去的。root PipelineExecutor 拿到一批 source 数据代表着 root Pipeline 依赖的所有 PipelineTask 都执行完毕，之后 root PipelineExecutor 内部以 push 的方式执行完这一批数据得到结果，将结果返回给客户端，用户就可以看到 Query 执行结果了。
+为了返回结果给客户端，当前 Query 的主线程会不断调用 root PipelineExecutor 的 pull 接口。需要注意的是，这个接口名字的 pull 指的仅仅是从最顶层 Pipeline 拿结果数据，在计算顶层 Pipeline 的时候仍然是从 source 到最后一个 PhysicalOperator push 计算过去的。root PipelineExecutor 拿到一批 source 数据代表着 root Pipeline 依赖的所有 PipelineTask 都执行完毕，之后 root PipelineExecutor 内部以 push 的方式执行完这一批数据得到结果，将结果返回给客户端，用户就可以看到 Query 执行结果了。
 
-以上就是 DuckDB 执行框架的大致介绍。实际实现时因为要特殊考虑一些算子的优化方案，所以实现起来会稍微复杂一些。比如考虑到 UNION ALL，DuckDB 会在一段 PhysicalOperator 链条上构造多个 Pipeline。考虑到 partitioned hash join 的高效实现，DuckDB 也会在一段 PhysicalOperator 链条上构造多个 Pipeline，和 UNION ALL 不同的是，这些 Pipeline 之间还有执行顺序的依赖关系。最终构造出来的可能就是有多个 root 的 Pipeline DAG。
+以上就是 DuckDB 执行框架的大致介绍。因为要特殊考虑一些算子的特殊优化，所以实际实现会稍微复杂一些。比如 UNION ALL，DuckDB 会在一段 PhysicalOperator 链条上构造多个 Pipeline。考虑到 partitioned hash join 的高效实现，DuckDB 也会在一段 PhysicalOperator 链条上构造多个 Pipeline，和 UNION ALL 不同的是，这些 Pipeline 之间有执行顺序的依赖关系。最终构造出来的可能就是有多个 root 的 Pipeline DAG。
 
-本文以当前（2022-11-14）DuckDB master 分支的 commit 为例，学习一下 DuckDB push-based execution model 涉及到的关键代码路径，感兴趣的同学可以 clone 代码编译和调试试试。在 DuckDB 中，Pipeline 的构造、Event 的调度都发生在 Executor::InitializeInternal() 函数中，本文后续的内容也将围绕这里面的关键函数展开：
+本文以当前（2022-11-14）DuckDB master 分支的 commit 为例，学习 DuckDB push-based execution model 涉及到的关键代码路径，感兴趣的朋友可以试试 clone 代码编译和调试玩玩。在 DuckDB 中，Pipeline 的构造、Event 的调度都发生在 Executor::InitializeInternal() 函数中，本文后续的内容也将围绕这里面的关键函数展开，其中几个关键的函数为：
+
+1. root_pipeline->Build(physical_plan)：top-down 的构造 Pipeline DAG
+2. ScheduleEvents(to_schedule)：基于除了 root Pipeline 以外的其他 Pipeline 构造 Event DAG，完成初始 Event 和 ExecutorTask 的调度。
+
+Executor::InitializeInternal() 函数的完整代码如下：
 
 ```cpp
 void Executor::InitializeInternal(PhysicalOperator *plan) {
@@ -77,12 +82,10 @@ void Executor::InitializeInternal(PhysicalOperator *plan) {
 }
 ```
 
+## 3. TaskScheduler 和后台线程池
 
 
-## 第 1 部分：TaskScheduler 和后台线程池
-
-
-在 DuckDB 启动时会创建一个全局的 TaskScheduler，在后台启动 nproc-1（main 函数）个后台线程，启动线程是在 TaskScheduler::SetThreadsInternal() 函数中进行的，从主线程启动线程池的调用堆栈如下，感兴趣的读者可以根据这些关键函数看看线程是如何启动起来的：
+在 DuckDB 启动时会创建一个全局的 TaskScheduler，在后台启动 nproc-1（main 函数）个后台线程，启动线程是在 TaskScheduler::SetThreadsInternal() 函数中进行的，从主线程启动线程池的调用堆栈如下，感兴趣的朋友们可以根据这些关键函数看看线程是如何启动起来的：
 ```
 (lldb) bt
 * thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
@@ -93,7 +96,7 @@ void Executor::InitializeInternal(PhysicalOperator *plan) {
     frame #4: 0x000000010709f689 duckdb`duckdb::DuckDB::DuckDB(this=0x0000602000000a90, path=0x0000000000000000, new_config=0x00007ff7bfefd420) at database.cpp:169:100
     ...
 ```
-后台线程启动后的主逻辑在 TaskScheduler::ExecuteForever() 中，在每个后台线程的生命周期内，它们会不停尝试从位于 TaskScheduler 的公共队列中取出一个 Task，调用 Task::Execute() 函数完成 Task 的执行：
+后台线程启动后的主逻辑在 TaskScheduler::ExecuteForever() 中，在每个后台线程的生命周期内，它们会不停从 TaskScheduler 的公共队列中取出 Task，调用 Task::Execute() 函数完成 Task 的执行：
 ```cpp
 void TaskScheduler::ExecuteForever(atomic<bool> *marker) {
 #ifndef DUCKDB_NO_THREADS
@@ -112,15 +115,15 @@ void TaskScheduler::ExecuteForever(atomic<bool> *marker) {
 #endif
 }
 ```
-Pipeline 的各个 Task 就是这样被后台线程并发执行的。要想控制 Pipeline 之间的执行顺序和 Pipeline 内的并发度，只需要设计和控制好各个 Task 入队的顺序即可完成 Pipeline 计算的调度。Pipeline 的执行主要依靠 ExecutorTask，各个算子如果需要自定义计算逻辑和调度规则也是通过实现新的 ExecutorTask 完成。
+Pipeline 的各个 Task 就是这样被后台线程并发执行的。要想控制 Pipeline 之间的执行顺序和 Pipeline 内的并发度，只需要设计和控制好各个 ExecutorTask 入队的顺序即可。Pipeline 的执行主要依靠 ExecutorTask，各个算子如果需要自定义计算逻辑和调度规则也是通过实现新的 ExecutorTask 完成。
 
-## 第 2 部分：ExecutorTask 和 Event 驱动的调度模型
+## 4. ExecutorTask 和 Event 驱动的调度模型
 
 ![Event based scheduling model](/images/duckdb-push-based-execution-model/Task-Event.jpg)
 
-在 Task 的执行框架内，后台线程会通过 ExecutorTask::Execute() 驱动当前 ExecutorTask 的执行。为了给各个 Pipeline 和 PhysicalOperator 提供灵活的执行方式，DuckDB 内各个 PhysicalOperator 可以各自实现特定的 ExecutorTask 用于完成自身特殊的执行和后续 Pipeline Task 的计算调度。ExecutorTask::Execute() 的执行会直接调用子类的 ExecutorTask::ExecuteTask() 函数完成当前 ExecutorTask 的实际执行。
+在 Task 的执行框架内，后台线程会通过 ExecutorTask::Execute() 驱动当前 ExecutorTask 的执行。为了给各个 Pipeline 和 PhysicalOperator 提供灵活的执行方式，DuckDB 内各个 PhysicalOperator 可以各自实现特定的 ExecutorTask 用于完成自身特殊的计算任务和后续 Pipeline Task 的计算调度。ExecutorTask::Execute() 的执行会直接调用子类的 ExecutorTask::ExecuteTask() 函数完成当前 ExecutorTask 的实际执行。
 
-对于一般的 Pipeline 来说，会直接构造一个叫 PipelineTask 的 ExecutorTask 子类。PipelineTask::ExecuteTask() 的代码逻辑如下：
+对于一般的 Pipeline 来说，会构造一个叫 PipelineTask 的 ExecutorTask 子类。PipelineTask::ExecuteTask() 的代码逻辑如下：
 
 ```cpp
 TaskExecutionResult ExecuteTask(TaskExecutionMode mode) override {
@@ -141,7 +144,7 @@ TaskExecutionResult ExecuteTask(TaskExecutionMode mode) override {
 }
 ```
 
-通过 PipelineExecutor::Execute() 完成当前 ExecutorTask 的执行后，它会去调用 Event::FinishTask() 函数进行 ExecutorTask 完成后各个 Event 子类自定义的收尾工作，在 Event::FinishTask() 函数如果发现当前 Event 的所有 Task 都执行完毕就会清理当前 Event 相关内容，并调用父亲 Event 的 CompleteDependency()：
+在 PipelineTask::ExecuteTask() 中，通过 PipelineExecutor::Execute() 完成当前 ExecutorTask 的执行后它会去调用 Event::FinishTask() 函数进行 ExecutorTask 完成后各个 Event 子类自定义的收尾工作，在 Event::FinishTask() 函数如果发现当前 Event 的所有 Task 都执行完毕就会清理当前 Event 相关内容，并调用父亲 Event 的 CompleteDependency()：
 
 ```cpp
 void Event::Finish() {
@@ -181,7 +184,7 @@ void Event::CompleteDependency() {
 从上面代码可以看到 Event 调度 Task 是通过 Event::Schedule() 函数完成的，这是个 Event 的纯虚函数，不同的子类 Event 需要自行实现。Pipeline 执行过程中使用的 Event 类型不多，最常见的是：
 
 * PipelineInitializeEvent：主要用来初始化当前 Pipeline 的 sink，会调度 1 个 PipelineInitializeTask
-* PipelineEvent：主要用来表示 Pipeline 的执行操作，可能会调度多个 ExecutorTask 到执行队列中。PipelineEvent 的 Schedule() 函数主要调用 Pipeline::Schedule() 完成 ExecutorTask 的计算调度，这里不再展开，感兴趣的读者可以继续追踪代码看看其中的实现细节
+* PipelineEvent：主要用来表示 Pipeline 的执行操作，可能会调度多个 ExecutorTask 到执行队列中。PipelineEvent 的 Schedule() 函数主要调用 Pipeline::Schedule() 完成 ExecutorTask 的计算调度，这里不再展开，感兴趣的朋友们可以继续追踪代码看看其中的实现细节
 * PipelineFinishEvent：主要用来标记当前 Pipeline 执行结束，在 Event::Finish() 检测到当前 Event 结束，调用到 PipelineFinishEvent::FinishEvent() 时完成 Pipeline::Finalize()，用来做 Pipeline 的清理操作
 * PipelineCompleteEvent：用来更新 Executor 中已结束的 Pipeline 的 counter completed_pipelines，Executor 主线程会不断检测 completed_pipelines，当发现所有中间 Pipeline 都执行完后，主线程会开始执行 root Pipeline，返回结果给客户端。
 
@@ -233,7 +236,7 @@ void Executor::ScheduleEventsInternal(ScheduleEventData &event_data) {
 }
 ```
 
-## 第 3 部分：PipelineExecutor 和 Pipeline 内基于 Push 的执行模型
+## 5. PipelineExecutor 和 Pipeline 内基于 Push 的执行模型
 
 PipelineExecutor::Execute() 函数通过调用 Pipeline 中各个 PhysicalOperator 的相应接口，以 Push 的方式完成了当前 Pipeline 的执行，执行逻辑可以概括为：
 
@@ -272,7 +275,7 @@ bool PipelineExecutor::Execute(idx_t max_chunks) {
 
 PhysicalOperator 同时包含了 source、operator、sink 所需要的所有接口，各个 PhysicalOperator 需要实现对应的接口完成相应的计算逻辑。比如 partitioned hash join 因为会分成 3 个阶段分别作为 sink、operator 和 source 角色，它同时实现了所有的接口。
 
-## 第 4 部分：主线程和 root Pipeline 的执行
+## 6. 主线程和 root Pipeline 的执行
 
 root Pipelines 比较特殊：在构建 Event DAG 的时候不会将这部分 Pipeline 考虑进去，这部分 Pipeline 也不会被 TaskScheduler 启动的后台线程异步执行，这部分 Pipeline 要想得到执行也需要等待所有中间 Pipeline 执行结束。
 
@@ -294,12 +297,12 @@ unique_ptr<QueryResult> PendingQueryResult::ExecuteInternal(ClientContextLock &l
 }
 ```
 
-PendingQueryResult::ExecuteTaskInternal() 经过几次函数调用后最终会来到 PipelineExecutor::Execute() 函数。这个函数初始一看可能会比较绕，但想要表达的信息是：
+PendingQueryResult::ExecuteTaskInternal() 经过几次函数调用后最终会来到 PipelineExecutor::Execute() 函数。这个函数初始一看可能会比较绕，但想要实现的功能是：
 
 1. 在所有中间 Pipeline 没有执行完之前一直和后台线程一起参与计算：如果从队列中取出来了一个 ExecutorTask 就尝试调用它的 Execute(TaskExecutionMode::PROCESS_PARTIAL) 函数完成小批量数据的计算，现在默认是 50 个 DataChunk。
 2. 如果所有 Pipeline 都执行完了，此时 completed_pipelines 与 total_pipelines（记录中间 Pipeline 的数量，不包含 root Pipeline）相等，Executor 会释放所有中间 Pipeline，标记 execution_result 为PendingExecutionResult::RESULT_READY。
 
-在这个小的 `while` 循环中，没有取出 task，或者执行了 Task 的小部分任务后，都会去检测其他线程执行过程中是否有 Error 产生，用户是否 cancel 了 query 等等，一旦遇到错误产生，就会分别通过 CancelTasks() 和 ThrowException() 取消后台异步 Task 的执行并将错误抛给主线程的上层。
+在这个小 while 循环中，如果没有取到 task，或者执行了 Task 的小部分任务后，都会去检测其他线程执行过程中是否有 Error 产生，用户是否 cancel 了 query 等等，一旦遇到错误产生，就会分别通过 CancelTasks() 和 ThrowException() 取消后台异步 Task 的执行并将错误抛给主线程的上层。
 
 ```cpp
 PendingExecutionResult Executor::ExecuteTask() {
@@ -374,17 +377,13 @@ unique_ptr<DataChunk> Executor::FetchChunk() {
 
 虽然从函数名来看 Executor 调用了 Pipeline::ExecutePull() 函数，但其实这个函数内部实现仍旧是 push 的方式，先从 source 拿到一批数据，然后再依次的经过所有 operators 的计算得到最终结果。
 
-## 第 5 部分：Pipeline 和 Event 的构造
+## 7. Pipeline 的构造
 
-Pipeline 的执行框架我们已经大概了解了，最后一个问题就是 PhysicalOperator DAG 是如何转换从 PipelineDAG 的了。Pipeline 主要由如下三部分构成，从物理执行计划划分 Pipeline 第一个遇到的问题是如何确定 Pipeline 的 sink 和 source：
+Pipeline 的执行框架我们已经大概了解，最后一个问题就是 PhysicalOperator tree 是如何转换成 Pipeline DAG 的了。Pipeline 主要由 source、operators 和 sink 这三部分构成，从物理执行计划划分 Pipeline 第一个遇到的问题是如何确定 Pipeline 的 sink 和 source。
 
-1. source：PhysicalOperator，表示该 Pipeline 的数据源
-2. opetators：vector\<PhysicalOperator\>，表示从 source 读取到数据后需要进行的所有计算
-3. sink: PhysicalOperator，表示该 Pipeline 最后一个算子，该算子也是下游 Pipeline 的 source
+DuckDB 采用了和 Hyper 一样的 Pipeline breaker 定义：那些需要消化掉所有孩子节点的数据后才能进行下一步计算输出结果的算子。典型的比如构造 hash join 或 hash aggregate 的 hash table，或者 sort 和 TopN 算子的排序操作，需要完全消费掉孩子节点的数据 后，才能得到正确结果进行下一阶段的数据。
 
-DuckDB 采用了和 Hyper 一样的 Pipeline breaker 定义：那些需要消化掉所有孩子节点的数据后才能进行下一步计算输出结果的算子。典型的比如构造 hash join 或 hash aggregate 的 hash table，需要完全消费掉孩子节点的数据将其构造成 hash table 后，才能 probe hash table 的数据输出结果给父亲节点。
-
-算子的具体实现决定了 Pipeline 的构造。物理执行计划转成 Pipeline 是由当前查询的 Executor 完成的，几个关键函数：
+算子的具体实现决定了 Pipeline 的构造。物理执行计划转成 Pipeline 是由其中的各个 PhysicalOperator 完成的，几个关键函数：
 
 * Executor::InitializeInternal()：把物理执行计划（PhysicalOperator tree）转成 Pipeline 的入口，所有构造出来的 Pipeline 都存储在该查询的 Executor 中。
 * PhysicalOperator::BuildPipelines()：构造 Pipeline 的是通过 top down 的遍历 PhysicalOperator tree 完成的，Pipeline 的 sink 会先被确定下来（要么是整个物理执行计划的根节点，要么是上一个 Pipeline 的 source 节点）。Executor 通过该函数遍历每个 PhysicalOperator，决定将其加入当前 Pipeline 的 operators 列表还是做为当前 Pipeline 的 source。遇到当前 Pipeline 的 source 时就需要结束构造当前 Pipeline 了，然后将该 source 作为下一个 Pipeline 的 sink，继续 top down 的遍历 PhysicalOperator tree 和构造新的 Pipeline。
@@ -431,7 +430,7 @@ PhysicalOperator::BuildPipelines() 不仅构建了 PhysicalOperator 和 Pipeline
 
 ![TopN and Aggregate to Pipelines](/images/duckdb-push-based-execution-model/topn-and-aggregate.jpg)
 
-### 从 PhysicalUnion 构造 Pipeline
+### 7.1. 从 PhysicalUnion 构造 Pipeline
 
 我们以 Union All 为例介绍一个稍微复杂有多个 child 的情况。DuckDB 的 Union All 用 PhysicalUnion 来表示，每个 PhysicalUnion 有 2 个孩子节点。如果用户 SQL 中有 N 个表 Union All，那么就会构造出 N-1 个 PhysicalUnion 算子。PhysicalUnion 仅仅用来汇总多个数据源，传递孩子节点的数据给它的父节点完成计算。
 
@@ -445,9 +444,8 @@ PhysicalUnion 有多个 child 数据源，意味着 PhysicalUnion 往下 top dow
 
 ![Union All to Pipelines](/images/duckdb-push-based-execution-model/unionall.jpg)
 
+### 7.2. 从 PhysicalJoin 构造 Pipeline
 
-
-### 从 PhysicalJoin 构造 Pipeline
 理解了 Union All 的 Pipeline 构造，我们再来看看稍微复杂点的 Join。PhysicalJoin 的 Pipeline 构造相对来说要复杂一点，需要我们先大致了解下 DuckDB 中 PhysicalJoin 的实现。
 
 DuckDB 的 Hash Join 采用了 partitioned hash join，当数据量比较大的时候可以通过 repartition 将数据落盘避免 OOM，这个多线程版本的 partitioned hash join，主要分为 3 个阶段：
@@ -460,31 +458,27 @@ DuckDB 的 Hash Join 采用了 partitioned hash join，当数据量比较大的�
 
 ![Hash Join to Pipelines](/images/duckdb-push-based-execution-model/join.jpg)
 
-## 最后，DuckDB 执行模式引发的一些思考
+## 8. DuckDB 执行模式的一些感受和思考
 
-### PipelineBreaker 的作用
+### 8.1. 计算调度的复杂性
 
-我会把计算简单抽象为数据和计算，就像 CPU 的 L1 Cache 分为 L1D 和 L1I 一样，之前思考 Pipeline breaker 的时候更多是从性能角度，这次在思考 Pipeline 之间的依赖关系和 ExecutorTask 的调度时才意识到这个容易被忽略的地方：Pipeline 也反应了计算的先后关系。这个关系在 Volcano 模型的 Pull 中没有那么明显，只是写代码时为了保证正确性其实会应用这些依赖关系，比如 hash join 在 build side 没有结束时就不会对外返回结果。
-
-### 性能提升的背后是计算调度的复杂性
-
-相比 Pull 模型，Push 模型把需要更多的控制 Pipeline 的调度，也需要考虑一个 Pipeline 内数据消费速度的问题（这个我们还没在本文涉及），这些代码都增加了工程实现的复杂度，理解起来也需要更多的时间。
-
-这也充分反应了 no pain no gain。DuckDB 这块代码其实也在不断变化中。执行模型，代码架构的变化反应的是背后认知和思维模型的变化。
-
-### 除了带来性能提升外，这种并发 Push 执行模型还有其他优势吗？
+这是一个最直观的感受。相比 Pull 模型，Push 模型在实现时需要多考虑如何控制 Pipeline 的计算调度，也需要考虑一个 Pipeline 内数据消费速度的问题（这个我们还没在本文涉及），这些代码增加了工程实现的复杂度，也增加了问题诊断的复杂度。
 
 
 
-### 从优化器的角度看，以 Pipeline 为目标的物理执行计划是否有更多优化空间？
+### 8.1. PipelineBreaker 的作用
+
+我喜欢把计算抽象为数据和计算两个部分，就像 CPU 的 L1 Cache 分为 L1D 和 L1I 一样，之前思考 Pipeline breaker 的时候更多是从计算性能角度，这次在思考 Pipeline 之间的依赖关系和 ExecutorTask 的调度时才意识到这个容易被忽略的地方：Pipeline 其实也反应了两个比较大的计算过程之间的先后关系。这个关系在 Volcano 模型的 Pull 中没有那么明显，只是写代码时为了保证正确性其实会应用这些依赖关系，比如 hash join 在 build side 没有结束时就不会对外返回结果。
 
 
 
-### 是否有更易于理解的抽象和代码实现方式？
+### 8.3. 除了带来性能提升外，这种并发 Push 执行模型还有其他优势吗？
+
+从数据库、数据仓库执行引擎的经验来看，遇到最多的线上问题可以分为两类：查询跑的慢并发，以及查询吃的内存太狠导致查询自己或者进程 OOM。DuckDB 因为有了基于 ExecutorTask 的计算调度机制，我们就有机会从源头来控制：如果内存或 CPU 资源有限就少调度些 ExecutorTask 来执行。这样至少能够把查询失败的问题变成查询变慢的问题，然后查询变慢的时候再去看资源使用率满不满，这样至少能守住服务可用性的 SLO，也比较符合一般的问题排查思路。
 
 
 
-## 参考材料
+## 9. 参考材料
 
 * [issues/1583](https://github.com/duckdb/duckdb/issues/1583) Move to push-based execution model
 * Push-Based Execution in DuckDB, by Mark Raasveldt: [slides](https://dsdsd.da.cwi.nl/slides/dsdsd-duckdb-push-based-execution.pdf), [video](https://www.youtube.com/watch?v=1kDrPgRUuEI)
