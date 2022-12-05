@@ -142,7 +142,7 @@ Appy 算子本身是可以执行的，但通常如果内表没有索引，或者
 
 论文的 3 小结 “COMPREHENSIVE OF AGGREGATION” 详细介绍了 Aggregate 相关的优化。其中一些聚合相关的优化在另一篇比较早期的经典论文《[Eager aggregation and lazy aggregation](https://www.vldb.org/conf/1995/P345.PDF)》中也提到了，感兴趣的朋友可以去看看。
 
-### Reording Aggregate Around Filter
+### Reordering Aggregate Around Filter
 
 为啥是 reorder 不是单纯的 pull up 或者 push down，主要原因还是这两种策略都有各自的最佳场景。reorder 的目的是枚举出所有这些可能的执行计划，把选择交给 CBO 的代价模型去评估。
 
@@ -152,7 +152,7 @@ Appy 算子本身是可以执行的，但通常如果内表没有索引，或者
 
 这个比较好理解，当且仅当 Filter 是对整个 group 过滤时才能将 Aggregate push down 或者将 Aggregate 从 Filter 下面 pull up。判断 function dependency 的简单方法是检测 Filter 使用的 column set 是否是 Aggregate 中 group by 的 column set 的子集。
 
-### Reording GroupBy Around Join
+### Reordering GroupBy Around Join
 
 ![GroupBy Around Join](/images/orthogonal-optimization-of-subqueries-and-aggregation/groupby-reordering.png)
 
@@ -166,7 +166,7 @@ Appy 算子本身是可以执行的，但通常如果内表没有索引，或者
 
 对于 left semi join 或 left anti semi join，他们也可以看做是先 join 再 filter，因此 Aggregate push down 或 pull up 可以采用同样的方式。
 
-### Reording GroupBy Around Outer Join
+### Reordering GroupBy Around Outer Join
 
 ![GroupBy Around Outer Join](/images/orthogonal-optimization-of-subqueries-and-aggregation/aggregate-left-outer-join.png)
 
@@ -227,6 +227,6 @@ Segmented Apply 可以看做是一种 partitioned nested loop join。它将左�
 
 ## 总结
 
-以上就是这篇论文的主体内容，论文还在 2.4 和 2.5 小结介绍了其他几种子查询的类型，比如当子查询出现在 SELECT 列表中时，为了确保 scalar function 的语义引入了 Max1Row 算子，感兴趣的朋可以去读一读原文，我们不在文章中继续展开了。
+以上就是这篇论文的主体内容，论文还在 2.4 和 2.5 小结介绍了其他几种子查询的类型，比如当子查询出现在 SELECT 列表中时，为了确保 scalar function 的语义引入了 Max1Row 算子，感兴趣的朋友们可以去读一读原文，我们不在文章中继续展开了。
 
 将子查询改写成 Apply、SegmentApply 等算子使我们可以应付绝大多数场景的子查询问题，论文提出的各种优化规则将子查询优化的问题分治成了一个个小问题，也让代码实现和维护变的更加简单，非常值得学习。
