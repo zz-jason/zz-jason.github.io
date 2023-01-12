@@ -9,19 +9,28 @@ draft: true
 
 几个关注的问题：
 
-1. 如何注册 Secondary Engine
+DDL & Meta data
 
-1. 如何同步数据到 Secondary Engine
+- 如何创建 secondary engine table，元数据如何存储
+- 数据如何从 primary engine（innodb）同步到 secondary engine
+- 如何删除 secondary engine table
 
-1. 如何读取 Secondary Engine 的数据
+DML & Transacton
 
-从 query processing 的视角来看，几个需要关注的细节
+- primary engine（innodb）的事务读写如何同步到 secondary engine
+- secondary engine 表现出来的事务隔离级别是什么
 
-1. 如何实现自己的 optimizer
+DQL
 
-1. 如何判断读 secondary 还是 primary 的数据
+- 如何 secondary engine 中优化和执行 select statement
+- 如何根据 cost 判断是采用 primary engine 执行还是 secondary engine 执行
+- secondary engine 的执行结果如何返回给 mysql client
 
-1. 计算如何下推 secondary engine 中，结果如何收回来
+Diagnose
+
+- secondary engine 有哪些系统变量、系统表，分别什么含义，如何维护
+- secondary engine 如何排查慢查询慢在哪
+- secondary engine 是否支持 explain analyze，是否支持 trace
 
 ## The Secondary Engine Framework
 
