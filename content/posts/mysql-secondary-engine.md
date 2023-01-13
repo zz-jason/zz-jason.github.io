@@ -13,6 +13,7 @@ DDL & Meta data
 
 - 如何创建 secondary engine table，元数据如何存储
 - 数据如何从 primary engine（innodb）同步到 secondary engine
+- 如何修改表结构
 - 如何删除 secondary engine table
 
 DML & Transacton
