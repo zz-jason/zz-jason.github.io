@@ -105,6 +105,9 @@ bool optimize_secondary_engine(THD *thd) {
 
 ## References
 
+- [MySQL HeatWave User Guide](https://dev.mysql.com/doc/heatwave/en/heatwave-introduction.html)
+- [MySQL · 源码阅读 · Secondary Engine](http://mysql.taobao.org/monthly/2020/11/04/)
+
 ## Appendix I: Build and run MySQL
 
 Build and install MySQL:
