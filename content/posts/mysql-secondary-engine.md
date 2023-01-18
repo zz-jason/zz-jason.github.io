@@ -104,3 +104,50 @@ bool optimize_secondary_engine(THD *thd) {
 ### Collect results from secondary engine
 
 ## References
+
+## Appendix I: Build and run MySQL
+
+Build and install MySQL:
+
+```cpp
+git clone --recursive https://github.com/mysql/mysql-server.git
+cd mysql-server
+
+cmake -B build -S . \
+      -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=build/install \
+      -DDOWNLOAD_BOOST=1 -DWITH_BOOST=. \
+      -DCMAKE_EXPORT_COMPILE_COMMANDS=1
+      
+cmake --build build -j `nproc`
+cmake --install build
+```
+
+Create a config file, for example, `my.cnf`:
+
+```txt
+[mysqld]
+basedir=/tmp/my-instance
+datadir=/tmp/my-instance/data
+```
+
+Initialize MySQL storage in the first run:
+
+```sh
+rm -rf /tmp/my-instance
+mkdir -p /tmp/my-instance
+
+build/install/bin/mysqld --defaults-file=my.cnf --user=root \
+                          --initialize-insecure \
+```
+
+Start MySQL instance after initialization:
+
+```sh
+build/install/bin/mysqld --defaults-file=my.cnf --user=root
+```
+
+Connect to the server:
+
+```sh
+build/install/bin/mysql -u root
+```
