@@ -8,7 +8,7 @@ draft: true
 ## Summary
 
 
-## DDL & Meta data
+## Create a secondary engine table
 
 - 如何创建 secondary engine table，元数据如何存储
 - 数据如何从 primary engine（innodb）同步到 secondary engine
@@ -24,6 +24,8 @@ CREATE TABLE orders (id INT) SECONDARY_ENGINE = RAPID;
 ```
 
 实测的时候，如果没有 load secondary engine 的 plugin，建表语句也能成功，show create table 也能显示出该表拥有 secondary_engine 属性。
+
+## Load the table into secondary engine
 
 第一次数据同步需要手工触发：
 
@@ -49,9 +51,42 @@ ALTER TABLE orders SECONDARY_LOAD;
 ```
 
 从上面的堆栈可以分析出：MySQL 为 secondary engine 的 alter table xxx secondary_load/secondary_unload 创建了一个 Sql_cmd_secondary_load_unload 的 cmd，通过执行这个 cmd 的 execute 函数完成 secondary engine 数据的 load 和 unload：
-- Sql_cmd_secondary_load_unload::execute：做基本的权限检查
-- Sql_cmd_secondary_load_unload::mysql_secondary_load_or_unload：设置 MDL、降级事务隔离级别为 RC 等，为数据 unload 到 secondary 做准备
-- secondary_engine_load_table：根据 secondary_engine 的名字（rapid）寻找对应的 plugin，plugin 需要也实现 “ha_resolve_by_name” 接口。上面报错的原因是根据 secondary engine 的名字找不到对应的 plugin，于是报错了 “ERROR 1286 (42000): Unknown storage engine 'RAPID'”，如果改成 “secondary engine plugin is not found” 之类的可能会更友好些。
+- #2: Sql_cmd_secondary_load_unload::execute：做基本的权限检查
+- #1: Sql_cmd_secondary_load_unload::mysql_secondary_load_or_unload：设置 MDL、降级事务隔离级别为 RC 等，为数据 unload 到 secondary 做准备
+- #0: secondary_engine_load_table：根据 secondary_engine 的名字（rapid）寻找对应的 plugin，plugin 需要也实现 “ha_resolve_by_name” 接口。上面报错的原因是根据 secondary engine 的名字找不到对应的 plugin，于是报错了 “ERROR 1286 (42000): Unknown storage engine 'RAPID'”，如果改成 “secondary engine plugin is not found” 之类的可能会更友好些。
+
+如果找到了对应的 plugin，则将该 plugin 转换为对应的 `handlerton`，为需要 load 的表创建一个对应的 `handler`，最终调用该 handler 的 `load_table()` 将数据 load 到 secondary engine 上。secondary engine plugin 需要自己实现该接口：
+```cpp
+/**
+ * Loads a table into its defined secondary storage engine.
+ *
+ * @param table Table opened in primary storage engine. Its read_set tells
+ * which columns to load.
+ *
+ * @return 0 if success, error code otherwise.
+ */
+virtual int load_table(const TABLE &table [[maybe_unused]]) {
+  /* purecov: begin inspected */
+  assert(false);
+  return HA_ERR_WRONG_COMMAND;
+  /* purecov: end */
+}
+```
+MySQL 代码中有一个 mock 的 secondary engine 实现，它位于 storage/secondary_engine_mock/ha_mock.cc 中，在这个 mock 的 secondary engine 实现中，`load_table()` 函数仅注册该表的表名，不会同步数据，应该也查不到数据了：
+
+```cpp
+int ha_mock::load_table(const TABLE &table_arg) {
+  assert(table_arg.file != nullptr);
+  loaded_tables->add(table_arg.s->db.str, table_arg.s->table_name.str);
+  if (loaded_tables->get(table_arg.s->db.str, table_arg.s->table_name.str) ==
+      nullptr) {
+    my_error(ER_NO_SUCH_TABLE, MYF(0), table_arg.s->db.str,
+             table_arg.s->table_name.str);
+    return HA_ERR_KEY_NOT_FOUND;
+  }
+  return 0;
+}
+```
 
 后续的数据在发生 DML 后会自动从 innodb 同步到 rapid 这个 secondary_engine 中
 
