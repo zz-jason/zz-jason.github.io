@@ -153,10 +153,48 @@ log_newpage(RelFileLocator *rlocator, ForkNumber forknum, BlockNumber blkno,
 写 WAL 主要包含三个步骤：
 
 1. XLogBeginInsert()：主要逻辑就是将 begininsert_called 设置为 true，XLogBeginInsert() 仅能被 call 一次，多次调用会报错 "XLogBeginInsert was already called"
-2. XLogRegisterBlock()：注册需要写入的 WAL block，
-3. XLogInsert()
+2. XLogRegisterBlock()：注册需要写入的 WAL block，将需要记录 WAL 的 page 注册在 `registered_buffers[0]` 内。对于这个新 page 来说，它的所有信息：page 的完整内容、block number、所属的 relation 文件信息都可以通过注册的 `registered_buffers[0]` 获取到。
+
+```c
+void
+XLogRegisterBlock(uint8 block_id, RelFileLocator *rlocator, ForkNumber forknum,
+				  BlockNumber blknum, Page page, uint8 flags)
+{
+	registered_buffer *regbuf;
+
+	Assert(begininsert_called);
+
+	if (block_id >= max_registered_block_id)
+		max_registered_block_id = block_id + 1;
+
+	if (block_id >= max_registered_buffers)
+		elog(ERROR, "too many registered buffers");
+
+	regbuf = &registered_buffers[block_id];
+
+	regbuf->rlocator = *rlocator;
+	regbuf->forkno = forknum;
+	regbuf->block = blknum;
+	regbuf->page = page;
+	regbuf->flags = flags;
+	regbuf->rdata_tail = (XLogRecData *) &regbuf->rdata_head;
+	regbuf->rdata_len = 0;
+
+	regbuf->in_use = true;
+}
+```
+
+3.  XLogInsert()：负责 WAL 的写入。这个函数比较长，最关键的部分是两个步骤：
+   1. 通过 `XLogRecordAssemble()` 将刚才注册的 `registered_buffers[0]` 构造成 `XLogRecData` 链表。
+   2. 通过 `XLogInsertRecord()`写入构造好的 `XLogRecData` 链表。
 
 
+
+`XLogRecordAssemble()`
+
+
+
+`XLogInsertRecord()`
 
 ## B Tree 的插入
 
