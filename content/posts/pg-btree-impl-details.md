@@ -185,8 +185,8 @@ XLogRegisterBlock(uint8 block_id, RelFileLocator *rlocator, ForkNumber forknum,
 ```
 
 3.  XLogInsert()：负责 WAL 的写入。这个函数比较长，最关键的部分是两个步骤：
-   1. 通过 `XLogRecordAssemble()` 将刚才注册的 `registered_buffers[0]` 构造成 `XLogRecData` 链表。
-   2. 通过 `XLogInsertRecord()`写入构造好的 `XLogRecData` 链表。
+    1. 通过 `XLogRecordAssemble()` 将刚才注册的 `registered_buffers[0]` 构造成 `XLogRecData` 链表。
+    2. 通过 `XLogInsertRecord()`写入构造好的 `XLogRecData` 链表。
 
 
 
@@ -207,3 +207,100 @@ extern bool btinsert(Relation rel, Datum *values, bool *isnull,
 ```
 
 ## B Tree 的读取
+
+
+
+## B Tree WAL 日志
+
+B Tree 的 WAL 类型定义在 src/include/access/nbtxlog.h 中，它们代表了所有 B Tree 操作过程中会记录的 WAL 日志类型：
+
+```c
+/*
+ * XLOG records for btree operations
+ *
+ * XLOG allows to store some information in high 4 bits of log record xl_info field
+ */
+#define XLOG_BTREE_INSERT_LEAF        0x00 /* add index tuple without split */
+#define XLOG_BTREE_INSERT_UPPER       0x10 /* same, on a non-leaf page */
+#define XLOG_BTREE_INSERT_META        0x20 /* same, plus update metapage */
+#define XLOG_BTREE_SPLIT_L            0x30 /* add index tuple with split */
+#define XLOG_BTREE_SPLIT_R            0x40 /* as above, new item on right */
+#define XLOG_BTREE_INSERT_POST        0x50 /* add index tuple with posting split */
+#define XLOG_BTREE_DEDUP              0x60 /* deduplicate tuples for a page */
+#define XLOG_BTREE_DELETE             0x70 /* delete leaf index tuples for a page */
+#define XLOG_BTREE_UNLINK_PAGE        0x80 /* delete a half-dead page */
+#define XLOG_BTREE_UNLINK_PAGE_META   0x90 /* same, and update metapage */
+#define XLOG_BTREE_NEWROOT            0xA0 /* new root page */
+#define XLOG_BTREE_MARK_PAGE_HALFDEAD 0xB0 /* mark a leaf as half-dead */
+#define XLOG_BTREE_VACUUM             0xC0 /* delete entries on a page during vacuum */
+#define XLOG_BTREE_REUSE_PAGE         0xD0 /* old page is about to be reused from FSM */
+#define XLOG_BTREE_META_CLEANUP       0xE0 /* update cleanup-related data in the metapage */
+```
+
+编译 PG 时加上 CFLAGS='-DWAL_DEBUG' 打开 PostgreSQL 的 WAL Debug 功能，启动 PG，创建一个带有 B Tree index 的表，插入数据即可看到 PostgreSQL 日志中打印的 WAL Debug 信息。仅看 B Tree 的 WAL，部分日志如下：
+
+```txt
+984:1973:2131:2023-02-08 23:02:31.356 CST [947945] LOG:  INSERT @ 0/156B8D0:  - Btree/INSERT_LEAF: off 349
+986:1977:2135:2023-02-08 23:02:31.356 CST [947945] LOG:  INSERT @ 0/156B958:  - Btree/INSERT_LEAF: off 238
+988:1981:2139:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156B9E0:  - Btree/INSERT_LEAF: off 223
+990:1985:2143:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156BA68:  - Btree/INSERT_LEAF: off 142
+992:1989:2147:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156BAF0:  - Btree/INSERT_LEAF: off 91
+994:1993:2151:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156BB78:  - Btree/INSERT_LEAF: off 260
+996:1997:2155:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156BBF8:  - Btree/DEDUP: nintervals 2
+997:1999:2157:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156C948:  - Btree/SPLIT_L: level 0, firstrightoff 198, newitemoff 191, postingoff 0
+998:2001:2159:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156C990:  - Btree/INSERT_UPPER: off 2
+1000:2005:2163:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156CA18:  - Btree/INSERT_LEAF: off 48
+1002:2009:2167:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156CAA0:  - Btree/INSERT_LEAF: off 134
+1004:2013:2171:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156CB28:  - Btree/INSERT_LEAF: off 193
+1006:2017:2175:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156CBB0:  - Btree/INSERT_LEAF: off 92
+1008:2021:2179:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156CC38:  - Btree/INSERT_LEAF: off 63
+1010:2025:2183:2023-02-08 23:02:31.357 CST [947945] LOG:  INSERT @ 0/156CCC0:  - Btree/INSERT_LEAF: off 58
+```
+
+### XLOG_BTREE_INSERT_LEAF
+
+这是最常见的 B Tree WAL 日志，大部分日志内容都是这个。XLOG_BTREE_INSERT_LEAF 日志只有在 `_bt_insertonpg()` 函数中会出现：
+
+```c
+static void _bt_insertonpg(Relation rel,
+                           BTScanInsert itup_key,
+                           Buffer buf,
+                           Buffer cbuf,
+                           BTStack stack,
+                           IndexTuple itup,
+                           Size itemsz,
+                           OffsetNumber newitemoff,
+                           int postingoff,
+                           bool split_only_page)
+```
+
+```c
+if (isleaf && postingoff == 0) {
+  /* Simple leaf insert */
+  xlinfo = XLOG_BTREE_INSERT_LEAF;
+} else { ... }
+XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+if (postingoff == 0) {
+  /* Just log itup from caller */
+  XLogRegisterBufData(0, (char*)itup, IndexTupleSize(itup));
+} else { ... }
+
+recptr = XLogInsert(RM_BTREE_ID, xlinfo);
+
+if (BufferIsValid(metabuf))
+  PageSetLSN(metapg, recptr);
+if (!isleaf)
+  PageSetLSN(BufferGetPage(cbuf), recptr);
+
+PageSetLSN(page, recptr);
+
+```
+
+XLOG_BTREE_INSERT_LEAF 日志的写入分为如下几步：
+
+1. xlinfo = XLOG_BTREE_INSERT_LEAF：设置 xlinfo 为 XLOG_BTREE_INSERT_LEAF
+2. XLogRegisterBuffer(0, buf, REGBUF_STANDARD)：注册 WAL buffer 用于写入
+3. XLogRegisterBufData(0, (char*)itup, IndexTupleSize(itup))：注册 itup 用于写入
+4. recptr = XLogInsert(RM_BTREE_ID, xlinfo)：写入 WAL，记录 LSN 到 recptr 中。
+5. 为相关 page 设置 LSN
+
