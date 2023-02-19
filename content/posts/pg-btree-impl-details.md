@@ -262,24 +262,31 @@ B Tree 的 WAL 类型定义在 src/include/access/nbtxlog.h 中，它们代表�
 这是最常见的 B Tree WAL 日志，大部分日志内容都是这个。XLOG_BTREE_INSERT_LEAF 日志只有在 `_bt_insertonpg()` 函数中会出现：
 
 ```c
-static void _bt_insertonpg(Relation rel,
-                           BTScanInsert itup_key,
-                           Buffer buf,
-                           Buffer cbuf,
-                           BTStack stack,
-                           IndexTuple itup,
-                           Size itemsz,
-                           OffsetNumber newitemoff,
-                           int postingoff,
-                           bool split_only_page)
+static void _bt_insertonpg(
+    Relation     rel,
+    BTScanInsert itup_key,
+    Buffer       buf,
+    Buffer       cbuf,
+    BTStack      stack,
+    IndexTuple   itup,
+    Size         itemsz,
+    OffsetNumber newitemoff,
+    int          postingoff,
+    bool         split_only_page
+) {
 ```
 
 ```c
+XLogBeginInsert();
+XLogRegisterData((char*)&xlrec, SizeOfBtreeInsert);
+
 if (isleaf && postingoff == 0) {
   /* Simple leaf insert */
   xlinfo = XLOG_BTREE_INSERT_LEAF;
 } else { ... }
+
 XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+
 if (postingoff == 0) {
   /* Just log itup from caller */
   XLogRegisterBufData(0, (char*)itup, IndexTupleSize(itup));
@@ -293,7 +300,6 @@ if (!isleaf)
   PageSetLSN(BufferGetPage(cbuf), recptr);
 
 PageSetLSN(page, recptr);
-
 ```
 
 XLOG_BTREE_INSERT_LEAF 日志的写入分为如下几步：
@@ -303,4 +309,189 @@ XLOG_BTREE_INSERT_LEAF 日志的写入分为如下几步：
 3. XLogRegisterBufData(0, (char*)itup, IndexTupleSize(itup))：注册 itup 用于写入
 4. recptr = XLogInsert(RM_BTREE_ID, xlinfo)：写入 WAL，记录 LSN 到 recptr 中。
 5. 为相关 page 设置 LSN
+
+
+
+我们在这里加个断点，看看被 XLogRegisterXXX 的 buf 和 itup 是从哪里构造出来的：
+
+```gdb
+(gdb) bt
+#0  _bt_insertonpg (rel=0x7f07bf40d938, itup_key=0x561b37cdfc10, buf=277, cbuf=0, stack=0x561b37cdfc98, itup=0x561b37cefb00, itemsz=16, newitemoff=94, postingoff=0, split_only_page=false) at ../src/backend/access/nbtree/nbtinsert.c:1233
+#1  0x0000561b36ca3cab in _bt_doinsert (rel=0x7f07bf40d938, itup=0x561b37cefb00, checkUnique=UNIQUE_CHECK_NO, indexUnchanged=false, heapRel=0x7f07bf419ba0) at ../src/backend/access/nbtree/nbtinsert.c:264
+#2  0x0000561b36cace4a in btinsert (rel=0x7f07bf40d938, values=0x7ffff4b93890, isnull=0x7ffff4b93870, ht_ctid=0x561b37cdf8f8, heapRel=0x7f07bf419ba0, checkUnique=UNIQUE_CHECK_NO, indexUnchanged=false, indexInfo=0x561b37cdfa80) at ../src/backend/access/nbtree/nbtree.c:191
+#3  0x0000561b36c9fe9d in index_insert (indexRelation=0x7f07bf40d938, values=0x7ffff4b93890, isnull=0x7ffff4b93870, heap_t_ctid=0x561b37cdf8f8, heapRelation=0x7f07bf419ba0, checkUnique=UNIQUE_CHECK_NO, indexUnchanged=false, indexInfo=0x561b37cdfa80) at ../src/backend/access/index/indexam.c:193
+#4  0x0000561b36e48eef in ExecInsertIndexTuples (resultRelInfo=0x561b37cee080, slot=0x561b37cdf8c8, estate=0x561b37cedc20, update=false, noDupErr=false, specConflict=0x0, arbiterIndexes=0x0) at ../src/backend/executor/execIndexing.c:416
+#5  0x0000561b36e8d9c5 in ExecInsert (context=0x7ffff4b93b40, resultRelInfo=0x561b37cee080, slot=0x561b37cdf8c8, canSetTag=true, inserted_tuple=0x0, insert_destrel=0x0) at ../src/backend/executor/nodeModifyTable.c:1146
+#6  0x0000561b36e919f0 in ExecModifyTable (pstate=0x561b37cede78) at ../src/backend/executor/nodeModifyTable.c:3814
+#7  0x0000561b36e564b3 in ExecProcNodeFirst (node=0x561b37cede78) at ../src/backend/executor/execProcnode.c:464
+#8  0x0000561b36e4a9e2 in ExecProcNode (node=0x561b37cede78) at ../src/include/executor/executor.h:262
+#9  0x0000561b36e4d229 in ExecutePlan (estate=0x561b37cedc20, planstate=0x561b37cede78, use_parallel_mode=false, operation=CMD_INSERT, sendTuples=false, numberTuples=0, direction=ForwardScanDirection, dest=0x561b37cf0a18, execute_once=true) at ../src/backend/executor/execMain.c:1633
+#10 0x0000561b36e4af73 in standard_ExecutorRun (queryDesc=0x561b37cfce70, direction=ForwardScanDirection, count=0, execute_once=true) at ../src/backend/executor/execMain.c:364
+#11 0x0000561b36e4ae03 in ExecutorRun (queryDesc=0x561b37cfce70, direction=ForwardScanDirection, count=0, execute_once=true) at ../src/backend/executor/execMain.c:308
+#12 0x0000561b3708a9f1 in ProcessQuery (plan=0x561b37cf08c8, sourceText=0x561b37c16530 "insert into t select floor(random() * 10000 + 1)::int, floor(random() * 10000 + 1)::int from t;", params=0x0, queryEnv=0x0, dest=0x561b37cf0a18, qc=0x7ffff4b93fa0) at ../src/backend/tcop/pquery.c:160
+#13 0x0000561b3708c3fd in PortalRunMulti (portal=0x561b37c912f0, isTopLevel=true, setHoldSnapshot=false, dest=0x561b37cf0a18, altdest=0x561b37cf0a18, qc=0x7ffff4b93fa0) at ../src/backend/tcop/pquery.c:1277
+#14 0x0000561b3708b96e in PortalRun (portal=0x561b37c912f0, count=9223372036854775807, isTopLevel=true, run_once=true, dest=0x561b37cf0a18, altdest=0x561b37cf0a18, qc=0x7ffff4b93fa0) at ../src/backend/tcop/pquery.c:791
+#15 0x0000561b37084bef in exec_simple_query (query_string=0x561b37c16530 "insert into t select floor(random() * 10000 + 1)::int, floor(random() * 10000 + 1)::int from t;") at ../src/backend/tcop/postgres.c:1237
+#16 0x0000561b3708998a in PostgresMain (dbname=0x561b37c140f0 "template1", username=0x561b37c4f0c0 "root") at ../src/backend/tcop/postgres.c:4565
+#17 0x0000561b36fcb23f in BackendRun (port=0x561b37c41ad0) at ../src/backend/postmaster/postmaster.c:4461
+#18 0x0000561b36fcaaeb in BackendStartup (port=0x561b37c41ad0) at ../src/backend/postmaster/postmaster.c:4189
+#19 0x0000561b36fc71f8 in ServerLoop () at ../src/backend/postmaster/postmaster.c:1779
+#20 0x0000561b36fc6aad in PostmasterMain (argc=3, argv=0x561b37c120a0) at ../src/backend/postmaster/postmaster.c:1463
+#21 0x0000561b36ecbb7f in main (argc=3, argv=0x561b37c120a0) at ../src/backend/main/main.c:196
+```
+
+
+
+从函数调用栈可以发现，itup 是在 `btinsert()` 中根据用户插入的一行数据 `values` 构造出来的，后续调用 `_bt_doinsert()` 将插入 itup 插入到该索引所属的 B Tree 中，完成插入后，itup 也在这里被销毁，释放内存：
+
+```c
+bool btinsert(
+    Relation         rel,
+    Datum*           values,
+    bool*            isnull,
+    ItemPointer      ht_ctid,
+    Relation         heapRel,
+    IndexUniqueCheck checkUnique,
+    bool             indexUnchanged,
+    IndexInfo*       indexInfo
+) {
+  bool       result;
+  IndexTuple itup;
+
+  /* generate an index tuple */
+  itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
+  itup->t_tid = *ht_ctid;
+
+  result = _bt_doinsert(rel, itup, checkUnique, indexUnchanged, heapRel);
+  pfree(itup);
+  return result;
+}
+```
+
+
+
+而 XLogRegisterBuffer(0, buf, REGBUF_STANDARD) 中的 buf 代表了需要该 B Tree 叶子结点所在的 buffer id，（它实际上是个整数类型），在 src/backend/access/transam/README 中我们能找到更多关于这个函数的作用说明：
+
+```
+void XLogRegisterBuffer(uint8 block_id, Buffer buf, uint8 flags);
+
+    XLogRegisterBuffer adds information about a data block to the WAL record.
+    block_id is an arbitrary number used to identify this page reference in
+    the redo routine.  The information needed to re-find the page at redo -
+    relfilelocator, fork, and block number - are included in the WAL record.
+
+    XLogInsert will automatically include a full copy of the page contents, if
+    this is the first modification of the buffer since the last checkpoint.
+    It is important to register every buffer modified by the action with
+    XLogRegisterBuffer, to avoid torn-page hazards.
+
+    The flags control when and how the buffer contents are included in the
+    WAL record.  Normally, a full-page image is taken only if the page has not
+    been modified since the last checkpoint, and only if full_page_writes=on
+    or an online backup is in progress.  The REGBUF_FORCE_IMAGE flag can be
+    used to force a full-page image to always be included; that is useful
+    e.g. for an operation that rewrites most of the page, so that tracking the
+    details is not worth it.  For the rare case where it is not necessary to
+    protect from torn pages, REGBUF_NO_IMAGE flag can be used to suppress
+    full page image from being taken.  REGBUF_WILL_INIT also suppresses a full
+    page image, but the redo routine must re-generate the page from scratch,
+    without looking at the old page contents.  Re-initializing the page
+    protects from torn page hazards like a full page image does.
+
+    The REGBUF_STANDARD flag can be specified together with the other flags to
+    indicate that the page follows the standard page layout.  It causes the
+    area between pd_lower and pd_upper to be left out from the image, reducing
+    WAL volume.
+
+    If the REGBUF_KEEP_DATA flag is given, any per-buffer data registered with
+    XLogRegisterBufData() is included in the WAL record even if a full-page
+    image is taken.
+```
+
+以及 XLogRegisterBufData 的详细说明：
+
+```
+void XLogRegisterBufData(uint8 block_id, char *data, int len);
+
+    XLogRegisterBufData is used to include data associated with a particular
+    buffer that was registered earlier with XLogRegisterBuffer().  If
+    XLogRegisterBufData() is called multiple times with the same block ID, the
+    data are appended, and will be made available to the redo routine as one
+    contiguous chunk.
+
+    If a full-page image of the buffer is taken at insertion, the data is not
+    included in the WAL record, unless the REGBUF_KEEP_DATA flag is used.
+```
+
+简单来说，如果 buf 所代表的 B Tree 节点是第一次被修改，Postgres 会把该节点的整个 page 都写到 WAL 中，通过 XLogRegisterBufData 注册的数据会被忽略（因为已经它们对 page 的修改包含在整个 page 中了）。如果该 page 不是 checkpoint 后的第一次修改，那么只有后面通过 XLogRegisterBufData() 注册的索引数据才会被写入到 WAL 中。这些逻辑判断都发生在 `XLogInsert()` 中。
+
+构造和写入 WAL 通常包含如下几步：
+
+```
+Constructing a WAL record
+-------------------------
+
+A WAL record consists of a header common to all WAL record types,
+record-specific data, and information about the data blocks modified.  Each
+modified data block is identified by an ID number, and can optionally have
+more record-specific data associated with the block.  If XLogInsert decides
+that a full-page image of a block needs to be taken, the data associated
+with that block is not included.
+
+The API for constructing a WAL record consists of five functions:
+XLogBeginInsert, XLogRegisterBuffer, XLogRegisterData, XLogRegisterBufData,
+and XLogInsert.  First, call XLogBeginInsert().  Then register all the buffers
+modified, and data needed to replay the changes, using XLogRegister*
+functions.  Finally, insert the constructed record to the WAL by calling
+XLogInsert().
+
+	XLogBeginInsert();
+
+	/* register buffers modified as part of this WAL-logged action */
+	XLogRegisterBuffer(0, lbuffer, REGBUF_STANDARD);
+	XLogRegisterBuffer(1, rbuffer, REGBUF_STANDARD);
+
+	/* register data that is always included in the WAL record */
+	XLogRegisterData(&xlrec, SizeOfFictionalAction);
+
+	/*
+	 * register data associated with a buffer. This will not be included
+	 * in the record if a full-page image is taken.
+	 */
+	XLogRegisterBufData(0, tuple->data, tuple->len);
+
+	/* more data associated with the buffer */
+	XLogRegisterBufData(0, data2, len2);
+
+	/*
+	 * Ok, all the data and buffers to include in the WAL record have
+	 * been registered. Insert the record.
+	 */
+	recptr = XLogInsert(RM_FOO_ID, XLOG_FOOBAR_DO_STUFF);
+```
+
+## B Tree Checkpoint
+
+
+
+## 附录  1: build, install, and debug Postgres
+
+```sh
+cd $POSTGRES_HOME
+
+CFLAGS='-DWAL_DEBUG' meson setup --prefix=`pwd`/build/install --buildtype=debug build .
+meson compile -C build -j `nproc`
+meson install -C build
+```
+
+`meson ` 会默认在 build 目录生成 `compile_commands.json` 文件，可以用来配置 vscode c/c++ configuration 的 "compileCommands"，方便代码跳转。
+
+
+
+启动和连接 postgres：
+
+```sh
+$POSTGRES_HOME/build/install/bin/postgres -D /tmp/pg-test/ > pg.out 2>&1
+$POSTGRES_HOME/build/install/bin/psql -d template1
+```
 
