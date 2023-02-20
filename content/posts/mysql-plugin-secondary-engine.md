@@ -6,7 +6,61 @@ draft: true
 ---
 
 ## Summary
+- Demo：初识 MySQL Secondary Engine
+- MySQL Plugin 机制
+- Secondary Engine DDL
+- Secondary Engine 写流程
+- Secondary Engine 读流程
 
+## Demo：初步体验 MySQL Secondary Engine
+
+## MySQL Plugin 机制
+
+MySQL 有着强大的 Plugin 机制，比如审计日志、查询改写，链接管理等，在 MySQL 源码中的 plugin 目录中我们能看到非常多的 plugin 实现样例，而 Secondary Engine 也是通过 MySQL 的 Plugin 机制实现的。
+
+实现一个插件，只需要使用 `mysql_declare_plugin` 这个宏，定义好插件的名字，以及相关接口的函数指针即可，比如下面要介绍的 mock secondary engine 插件是这样定义的：
+
+```cpp
+mysql_declare_plugin(mock){
+    MYSQL_STORAGE_ENGINE_PLUGIN,
+    &mock_storage_engine,
+    "MOCK",
+    PLUGIN_AUTHOR_ORACLE,
+    "Mock storage engine",
+    PLUGIN_LICENSE_GPL,
+    Init,
+    nullptr,
+    Deinit,
+    0x0001,
+    nullptr,
+    nullptr,
+    nullptr,
+    0,
+} mysql_declare_plugin_end;
+```
+
+- [ ] TODO：简要说明插件接口中几个关键函数的作用
+
+MySQL 源码中有一个 mock 的 Secondary Engine 实现，它位于 storage/secondary_engine_mock/ha_mock.cc 中，从代码注释来看这个 mock 的 Secondary Engine 主要是用来方便测试使用：
+
+```cpp
+/**
+ * The MOCK storage engine is used for testing MySQL server functionality
+ * related to secondary storage engines.
+ *
+ * There are currently no secondary storage engines mature enough to be merged
+ * into mysql-trunk. Therefore, this bare-minimum storage engine, with no
+ * actual functionality and implementing only the absolutely necessary handler
+ * interfaces to allow setting it as a secondary engine of a table, was created
+ * to facilitate pushing MySQL server code changes to mysql-trunk with test
+ * coverage without depending on ongoing work of other storage engines.
+ *
+ * @note This mock storage engine does not support being set as a primary
+ * storage engine.
+ */
+```
+
+后面的所有代码研究都会基于它进行。
 
 ## Create a secondary engine table
 
@@ -251,8 +305,7 @@ bool optimize_secondary_engine(THD *thd) {
 关键问题：
 
 1. 怎么注册一个 secondary engine 和它对应的 optimize_secondary_engine_t() 函数实现？
-
-1. SQL 执行时如何处理 secondary engine，计算是否可以下推？
+2. SQL 执行时如何处理 secondary engine，计算是否可以下推？
 
 ### compare_secondary_engine_cost()
 
@@ -280,15 +333,16 @@ bool optimize_secondary_engine(THD *thd) {
 #18 0x00007ffb87be4133 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:95
 ```
 
+这个函数调用栈比较深，看起来是 mysql 对 secondary_engine 的 table 做完优化后，调用这个函数来向 secondary_engine 获取该 plan 的 cost。写了几种类型的测试后发现只有在当前 JOIN 的所有 table 都是 secondary_engine 表时才会使用该函数估算 cost。mysql 目前是通过 `secondary_engine_cost_threshold` 来判断 secondary_engine 上的表能否在 secondary_engine 上执行。看起来这个估算出来的 cost 就是用来和这个变量进行对比了。
+
+- [ ] TODO：验证这个 cost 和 `secondary_engine_cost_threshold` 的关系
+
+另外我写了一个两表 join 的查询，其中一个表是 secondary_engine 表，另一个是普通 innodb 表，测试下来他是不能走到这个 cost estimation 函数的，那么：
+
+- [ ] TODO：看起来一条 Query 要么全部走 secondary engine，要么全部走 innodb，不能像 TiDB 一样一个 subplan 走 TiFlash 一个 subplan 走 TiKV？需要从代码中验证一下
 
 
 ### secondary_engine_modify_access_path_cost()
-
-
-
-### secondary_engine_supports_ddl()
-
-secondary engine 中
 
 
 
@@ -322,6 +376,9 @@ enum class SecondaryEngineFlag : SecondaryEngineFlags {
 
 ### 哪些 DDL 允许被执行？
 
+secondary_engine_supports_ddl()
+
+secondary engine 中
 1. notify_exclusive_mdl()
 2. notify_alter_table()
 3. notify_rename_table()
