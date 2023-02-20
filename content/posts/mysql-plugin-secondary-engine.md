@@ -62,10 +62,11 @@ MySQL 源码中有一个 mock 的 Secondary Engine 实现，它位于 storage/se
 
 后面的所有代码研究都会基于它进行。
 
-## Create a secondary engine table
+## Secondary Engine DDL
+
+### Create a secondary engine table
 
 - 如何创建 secondary engine table，元数据如何存储
-- 数据如何从 primary engine（innodb）同步到 secondary engine
 - 如何修改表结构
 - 如何删除 secondary engine table
 
@@ -79,7 +80,7 @@ CREATE TABLE orders (id INT) SECONDARY_ENGINE = RAPID;
 
 实测的时候，如果没有 load secondary engine 的 plugin，建表语句也能成功，show create table 也能显示出该表拥有 secondary_engine 属性。
 
-## Load the table into secondary engine
+### Load the table into secondary engine
 
 第一次数据同步需要手工触发：
 
@@ -147,24 +148,31 @@ int ha_mock::load_table(const TABLE &table_arg) {
 参考：
 - [2.2.2 Loading Data Manually](https://dev.mysql.com/doc/heatwave/en/heatwave-loading-data-manually.html)
 
-## DML & Transacton
+### 哪些 DDL 允许被执行？
+
+secondary_engine_supports_ddl()
+
+secondary engine 中
+1. notify_exclusive_mdl()
+2. notify_alter_table()
+3. notify_rename_table()
+4. notify_truncate_table()
+
+
+
+## Secondary Engine 写流程
 
 - primary engine（innodb）的事务读写如何同步到 secondary engine
 - secondary engine 表现出来的事务隔离级别是什么
 
-DQL
+### Binlog 同步
+
+
+## Secondary Engine 读流程
 
 - 如何 secondary engine 中优化和执行 select statement
 - 如何根据 cost 判断是采用 primary engine 执行还是 secondary engine 执行
 - secondary engine 的执行结果如何返回给 mysql client
-
-Diagnose
-
-- secondary engine 有哪些系统变量、系统表，分别什么含义，如何维护
-- secondary engine 如何排查慢查询慢在哪
-- secondary engine 是否支持 explain analyze，是否支持 trace
-
-## Query Processing on Secondary Engine
 
 ### prepare_secondary_engine()
 
@@ -207,26 +215,24 @@ using prepare_secondary_engine_t = bool (*)(THD *thd, LEX *lex);
 这个函数用来给在 secondary engine 中执行的 query 创建需要使用的 query context，然后通过当前 query 的 LEX 注册进去，后续就可以通过 LEX 访问这个 query context 了：
 
 ```cpp
-  /**
-    Gets the secondary engine execution context for this statement.
-  */
-  Secondary_engine_execution_context *secondary_engine_execution_context()
-      const {
-    return m_secondary_engine_context;
-  }
+/**
+  Gets the secondary engine execution context for this statement.
+*/
+Secondary_engine_execution_context *secondary_engine_execution_context() const {
+  return m_secondary_engine_context;
+}
 
-  /**
-    Sets the secondary engine execution context for this statement.
-    The old context object is destroyed, if there is one. Can be set
-    to nullptr to destroy the old context object and clear the
-    pointer.
+/**
+  Sets the secondary engine execution context for this statement.
+  The old context object is destroyed, if there is one. Can be set
+  to nullptr to destroy the old context object and clear the
+  pointer.
 
-    The supplied context object should be allocated on the execution
-    MEM_ROOT, so that its memory doesn't have to be manually freed
-    after query execution.
-  */
-  void set_secondary_engine_execution_context(
-      Secondary_engine_execution_context *context);
+  The supplied context object should be allocated on the execution
+  MEM_ROOT, so that its memory doesn't have to be manually freed
+  after query execution.
+*/
+void set_secondary_engine_execution_context(Secondary_engine_execution_context *context);
 ```
 
 MySQL 提供的默认实现在 `Secondary_engine_execution_context `中，没有包含任何数据，secondary engine 的 实现者进需要继承该 class 即可。
@@ -249,7 +255,6 @@ MySQL 提供的默认实现在 `Secondary_engine_execution_context `中，没有
 #10 0x00007ffb88011609 in start_thread (arg=<optimized out>) at pthread_create.c:477
 #11 0x00007ffb87be4133 in clone () at ../sysdeps/unix/sysv/linux/x86_64/clone.S:95
 ```
-
 
 
 函数签名：
@@ -351,11 +356,11 @@ bool optimize_secondary_engine(THD *thd) {
 secondary_engine_flags 定义了 secondary engine 中支持的算子：
 
 ```cpp
-  /// Bitmap which contains the supported join types and other flags
-  /// for a secondary storage engine when used with the hypergraph join
-  /// optimizer. If it is empty, it means that the secondary engine
-  /// does not support the hypergraph join optimizer.
-  SecondaryEngineFlags secondary_engine_flags;
+/// Bitmap which contains the supported join types and other flags
+/// for a secondary storage engine when used with the hypergraph join
+/// optimizer. If it is empty, it means that the secondary engine
+/// does not support the hypergraph join optimizer.
+SecondaryEngineFlags secondary_engine_flags;
 
 // Capabilities (bit flags) for secondary engines.
 using SecondaryEngineFlags = uint64_t;
@@ -371,26 +376,16 @@ enum class SecondaryEngineFlag : SecondaryEngineFlags {
 ```
 
 
-
-
-
-### 哪些 DDL 允许被执行？
-
-secondary_engine_supports_ddl()
-
-secondary engine 中
-1. notify_exclusive_mdl()
-2. notify_alter_table()
-3. notify_rename_table()
-4. notify_truncate_table()
-
-
-
-
-
 ### Execute query on secondary engine
 
 ### Collect results from secondary engine
+
+## Secondary Engine 故障诊断
+
+- secondary engine 有哪些系统变量、系统表，分别什么含义，如何维护
+- secondary engine 如何排查慢查询慢在哪
+- secondary engine 是否支持 explain analyze，是否支持 trace
+
 
 ## References
 
