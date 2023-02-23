@@ -2,7 +2,7 @@
 title: "[VLDB 2021] Scabbard: Single-Node Fault-Tolerant Stream Processing"
 date: 2023-02-19T06:27:23Z
 categories: ["Paper Reading"]
-draft: false
+draft: true
 ---
 
 这篇论文解决的问题：因为单机磁盘 IO 受限，通常单节点流处理系统的故障恢复依赖于像 kafka 这样的上游分布式系统，使得单节点流处理系统的部署和运维变的非常复杂。

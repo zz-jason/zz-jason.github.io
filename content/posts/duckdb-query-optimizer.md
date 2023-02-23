@@ -2,7 +2,7 @@
 title: "Duckdb Query Optimizer"
 date: 2023-02-19T10:46:14Z
 categories: ["DuckDB"]
-draft: false
+draft: true
 ---
 
 ## ClientContext::CreatePreparedStatement
