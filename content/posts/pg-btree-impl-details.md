@@ -340,8 +340,6 @@ XLOG_BTREE_INSERT_LEAF 日志的写入分为如下几步：
 #21 0x0000561b36ecbb7f in main (argc=3, argv=0x561b37c120a0) at ../src/backend/main/main.c:196
 ```
 
-
-
 从函数调用栈可以发现，itup 是在 `btinsert()` 中根据用户插入的一行数据 `values` 构造出来的，后续调用 `_bt_doinsert()` 将插入 itup 插入到该索引所属的 B Tree 中，完成插入后，itup 也在这里被销毁，释放内存：
 
 ```c
@@ -367,8 +365,6 @@ bool btinsert(
   return result;
 }
 ```
-
-
 
 而 XLogRegisterBuffer(0, buf, REGBUF_STANDARD) 中的 buf 代表了需要该 B Tree 叶子结点所在的 buffer id，（它实际上是个整数类型），在 src/backend/access/transam/README 中我们能找到更多关于这个函数的作用说明：
 
@@ -474,24 +470,42 @@ XLogInsert().
 
 
 
-## 附录  1: build, install, and debug Postgres
+## 附录  1: build, install, and debug Postgres in macOS
 
 ```sh
 cd $POSTGRES_HOME
 
-CFLAGS='-DWAL_DEBUG' meson setup --prefix=`pwd`/build/install --buildtype=debug build .
+CFLAGS='-DWAL_DEBUG' meson setup \
+	--prefix=`pwd`/build/install \
+	--buildtype=debug build .
 meson compile -C build -j `nproc`
 meson install -C build
 ```
 
 `meson ` 会默认在 build 目录生成 `compile_commands.json` 文件，可以用来配置 vscode c/c++ configuration 的 "compileCommands"，方便代码跳转。
 
-
-
 启动和连接 postgres：
 
 ```sh
-$POSTGRES_HOME/build/install/bin/postgres -D /tmp/pg-test/ > pg.out 2>&1
+# init postgres instance
+$POSTGRES_HOME/build/install/bin/initdb -D /tmp/pg-test -U ${YOUR_LOGIN_USER}
+
+# start postgres
+$POSTGRES_HOME/build/install/bin/pg_ctl -D /tmp/pg-test -l ${LOG_FILE} start
+
+# connect with template1
 $POSTGRES_HOME/build/install/bin/psql -d template1
 ```
 
+Test with btree index:
+
+```sql
+CREATE TABLE t(a BIGINT, b BIGINT);
+CREATE INDEX idx_a USING BTREE ON t(a);
+
+-- enable wal_debug
+SET WAL_DEBUG=TRUE;
+
+-- write and check the log content
+INSERT INTO t VALUES(RANDOM()*10000, RANDOM()*10000);
+```
