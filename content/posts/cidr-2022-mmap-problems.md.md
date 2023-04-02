@@ -1,6 +1,6 @@
 ---
 title: "[CIDR 2022] Are You Sure You Want to Use MMAP in Your Database Management System?"
-date: 2023-3-31T08:00:00Z
+date: 2023-03-31T08:00:00Z
 categories: ["Paper Reading"]
 ---
 
