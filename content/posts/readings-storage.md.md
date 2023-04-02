@@ -22,7 +22,9 @@ draft: false
 
 - [Virtual-Memory Assisted Buffer Management](https://www.cs.cit.tum.de/fileadmin/w00cfj/dis/_my_direct_uploads/vmcache.pdf), 2023, SIGMOD
 - [Memory-Optimized Multi-Version Concurrency Control for Disk-Based Database Systems](https://db.in.tum.de/~freitag/papers/p2797-freitag.pdf), 2022, VLDB
+- [Are You Sure You Want to Use MMAP in Your Database Management System?](https://db.cs.cmu.edu/papers/2022/cidr2022-p13-crotty.pdf), 2022, CIDR
 - [Spitfire: A Three-Tier Buffer Manager for Volatile and Non-Volatile Memory](https://db.cs.cmu.edu/papers/2021/zhou-sigmod2021.pdf), 2021, SIGMOD
+- [In-Memory Performance for Big Data](https://storage.googleapis.com/pub-tools-public-publication-data/pdf/43985.pdf), 2014, VLDB
 
 ## Log & Recover
 
@@ -77,9 +79,15 @@ TODO
 - [Autoscaling Tiered Cloud Storage in Anna](https://dl.acm.org/doi/pdf/10.14778/3311880.3311881), 2019, VLDB
 - [Automated Demand-driven Resource Scaling in Relational Database-as-a-Service](http://www.audentia-gestion.fr/MICROSOFT/p883-das.pdf), 2016, SIGMOD
 
-## Transactions & Concurrenct Conctrol
+## Transaction & Concurrenct Conctrol
 
-- [Memory-Optimized Multi-Version Concurrency Control for Disk-Based Database Systems](https://db.in.tum.de/~freitag/papers/p2797-freitag.pdf)
+- [Scalable and Robust Snapshot Isolation for High-Performance Storage Engines](https://www.vldb.org/pvldb/vol16/p1426-alhomssi.pdf), 2022, VLDB
+- [Memory-Optimized Multi-Version Concurrency Control for Disk-Based Database Systems](https://db.in.tum.de/~freitag/papers/p2797-freitag.pdf), 2022, VLDB
+- [An Empirical Evaluation of In-Memory Multi-Version Concurrency Control](https://www.vldb.org/pvldb/vol10/p781-Wu.pdf), 2017, VLDB
+- [Serializable Snapshot Isolation in PostgreSQL](https://drkp.net/papers/ssi-vldb12.pdf), 2012, VLDB
+- [Serializable Isolation for Snapshot Databases](https://courses.cs.washington.edu/courses/cse444/08au/544M/READING-LIST/fekete-sigmod2008.pdf), 2009, TODS
+- [Making Snapshot Isolation Serializable](https://dsf.berkeley.edu/cs286/papers/ssi-tods2005.pdf), 2005, TODS
+- [A Critique of ANSI SQL Isolation Levels](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr-95-51.pdf), 1995, SIGMOD
 
 ## Systems
 
