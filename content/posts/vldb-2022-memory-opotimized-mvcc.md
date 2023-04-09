@@ -7,22 +7,20 @@ draft: false
 
 ## 简介
 
-这篇论文主要讲了 Umbra（TUM 实现的 larger-than-RAM 数据库）的高性能 MVCC 实现。作者将事务分为两类，一类是数据修改量不大可以在内存中完成的小事务，一类是需要修改大量数据的 bulk operation（比如 bulk load）。作者提出了将所有老版本数据存储在内存的 MVCC 实现方案，可以极大加速常规小事务的执行。同时也给出了一种应对 bulk operation 的事务执行策略。
-
-虽然整个 MVCC 看完后感觉有些地方不是很完美，但有不少地方还是可以借鉴学习下，一些问题应该也可以在作者的基础上继续优化和解决。个人经验和本文篇幅所限，有些论文中的细节不一定能准确覆盖到，建议感兴趣的朋友详细阅读下这篇论文。
+这篇论文主要讲了 Umbra（TUM 实现的 larger-than-RAM 数据库）的高性能 MVCC 实现。作者将事务分为两类，一类是数据修改量不大可以在内存中完成的常规事务，一类是需要修改大量数据的 bulk operation（比如 bulk load）。作者提出了将所有老版本数据存储在内存的 MVCC 实现方案，可以极大加速常规事务的执行。同时也给出了一种应对 bulk operation 的事务执行策略。
 
 ## 基本思路
 
 ![Figure 1: Illustration of decentralized version maintenance in an in-memory system](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304071948820.png)
 
-**版本链（version chain）**：每个事务有一个 private version buffer，在更新数据时先将旧值从 B tree page 拷贝到 version buffer，标注上当前事务的 transaction ID，然后直接在 page 上原地更新。当事务提交时，version chain 上标注的 transaction ID 会被修改为对应的 commit TS。对于表中一行记录来说，所有老版本数据分布在各个事务的 private version buffer 中，以新版本指向老版本的方式组成了 version chain。不再使用的老版本数据会被及时 GC 掉。version chain 上每个数据的版本存储在 chain 的下一个节点上，chain 上最后一个节点没有版本信息。
+**版本链（version chain）**：每个事务有一个 private version buffer，更新数据时先将旧值从 B tree page 拷贝到 version buffer，标注上当前事务的 transaction ID，然后直接在 page 上原地更新。事务提交时，version chain 上标注的 transaction ID 会被修改为对应的 commit TS。对于表中一行记录来说，所有老版本数据分布在各个事务的 private version buffer 中，以新版本指向老版本的方式组成了 version chain。不再使用的老版本数据会被及时 GC。version chain 上每个数据的版本存储在 chain 的下一个节点上，chain 上最后一个节点没有版本信息。
 
 **时间戳**：每个事务生命周期内涉及到 3 个时间戳，事务刚开始时会分配 transaction ID 和 start TS，事务在提交时会分配 commit TS。所有事务的 transaction ID 位于 2^63 到 2^64-1 之间，所有事务的 start 和 commit TS 位于 0 到 2^63-1 之间。transaction ID 使用一个 TS 生成器分配，start 和 commit TS 使用另一个 TS 生成器分配，TS 需要保证单调递增。
 
 **可见性**：数据的每个版本都有一个时间戳，要么是 commit TS 要么是 transaction ID。事务在读数据的时候从 page 上的数据开始遍历它的 version chain，只有满足这些条件之一的才对当前事务可见：
 1. 当前数据没有版本信息，比如没有 version chain 的数据，或者 version chain 最末尾的数据
 2. 当前数据的版本（存储在 version chain 的下一个节点上）等于当前事务的 transaction ID，表明这个数据是当前事务修改的
-3. 当前数据的版本小于等于当前事务的 start TS，表明它是一个在 start TS 之前已提交事务的更新结果
+3. 当前数据的版本小于等于当前事务的 start TS，表明它是一个在 start TS 之前已提交事务的执行结果
 
 比如上图，假设有个 transaction ID 为 Tc 的活跃事务，它的 start TS 是 T2，它读左边这个表时能看到的数据是：
 1. 第 1 行是 A：A 的版本是 Tc，和它的 T 的 transaction ID 相等，可见
@@ -44,13 +42,13 @@ draft: false
 
 那如何找到某 page 的 local mapping table 呢。如果该 page 已经加载到内存中，会直接在存储 page 内容的 buffer frame 上增加一个指向该 local mapping table 内存指针，这样访问 page 内容时就可以直接通过这个指针找到对应的 local mapping table。
 
-当内存中的 page 被缓存替换到磁盘后，Umbra 将其 page ID 和 local mapping table 插入到内存中维护的 orphans 哈希表中，这个哈希表存储了所有写入磁盘后的 page 的 local mapping table。等之后磁盘上的 page 再次加载进来时就可以通过访问这个哈希表找到对应的 local mapping table，将它和 page 内容加载到内存的 buffer frame 中去，同时也从这个 orphans 哈希表中移除。
+当内存中的 page 被替换到磁盘后，Umbra 将其 page ID 和 local mapping table 插入到内存中维护的 orphans 哈希表中，这个哈希表存储了所有写入磁盘后的 page 的 local mapping table。等之后磁盘上的 page 再次加载进来时就可以通过访问这个哈希表找到对应的 local mapping table，将它和 page 内容加载到内存的 buffer frame 中去，同时也从这个 orphans 哈希表中移除。
 
 ### 垃圾回收
 
 ![Figure 3: Illustration of garbage collection within our pro- posed approach](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304080959821.png)
 
-Umbra 采用《Scalable Garbage Collection for In-Memory MVCC Systems》（同样来自 TUM，2019 年发表在 VLDB）中提出的 Steam GC，将垃圾回收工作分散在不同的组件和工作线程中，尽可能以去中心化方式进行 GC。在 Umbra 中，只有 version buffer 和 local mapping table 这两个地方会产生需要清理的“垃圾”，GC 主要围绕它们进行。
+Umbra 采用《[Scalable Garbage Collection for In-Memory MVCC Systems](http://www.vldb.org/pvldb/vol13/p128-bottcher.pdf)》（同样来自 TUM，2019 年发表在 VLDB）中提出的 Steam GC，将垃圾回收工作分散在不同的组件和工作线程中，尽可能以去中心化方式进行 GC。在 Umbra 中，只有 version buffer 和 local mapping table 这两个地方会产生需要清理的“垃圾”，GC 主要围绕它们进行。
 
 ![Figure 4: Transaction lists for garbage collection](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304090922625.png)
 
@@ -74,19 +72,19 @@ Umbra 在实现上尽可能避免中心化的数据结构和操作，提升系�
 
 大事务可以使用多个工作线程执行，维护在全局的 active 和 recently committed list 中，因为同时执行的大事务不多，这个全局 latch 的锁竞争不会成为主要性能瓶颈。大事务执行时内部也会维护自己的 version buffer，避免 version 分配时和其他单线程执行的小事务产生争用。
 
-利用原子变量实现了一个轻量化的 latch 来保护 version chain，使得 version chain 的 GC 不会影响 version chain 的并发读。这个轻量化 latch 可以参考 TUM 2020 年发表在 VLDB 上的《Scalable and Robust Latches for Database Systems》提出的 HybridLatch，也是在 Umbra 上的工作成果。
+利用原子变量实现了一个轻量化的 latch 来保护 version chain，使得 version chain 的 GC 不会影响 version chain 的并发读。这个轻量化 latch 可以参考《[Scalable and Robust Latches for Database Systems](https://db.in.tum.de/~giceva/papers/damon_latches.pdf?lang=de)》（同样来自 TUM，2020 年发表在 VLDB）提出的 HybridLatch，也是在 Umbra 上的工作成果。
 
 ## 面向 Bulk Operation 的磁盘 MVCC
 
-并不是所有事务修改的数据量都很小能够在内存中完全放下，因此需要一种机制来处理内存放不下的大事务。而从场景来来看，作者认为这样的操作要么是偶发的系统管理任务，要么是 user 不小心写的 buggy query。
+并不是所有事务修改的数据量都很小能够在内存中完全放下，因此需要一种机制来处理内存放不下的大事务。而从场景来来看，作者认为这样的操作要么是偶发的系统管理任务，要么是用户不小心写的 buggy query。
 
-另外作者认为仅需要支持流水线式的串行 bulk operation 即可，原因是每个 bulk operation 理论上都会极大消耗系统的写带宽，而且因为 bulk operation 涉及的数据量很大，并发的 bulk operation 之间很容易冲突，所以允许多个 bulk operation 并发执行没啥好处。而且为了避免 bulk operation 和用户事务冲突而 abort，在 bulk operation 开始后 Umbra 只允许 read-only 的事务并发执行。
+另外作者认为仅需要支持串行 bulk operation 即可，原因是每个 bulk operation 理论上都会极大消耗系统的写带宽，而且因为 bulk operation 涉及的数据量很大，并发的 bulk operation 之间很容易冲突，所以允许多个 bulk operation 并发执行没啥好处。而且为了避免 bulk operation 和用户事务冲突而 abort，在 bulk operation 开始后 Umbra 只允许 read-only 的事务并发执行。
 
 作者在后面提出了一些思路来解决这些限制，使 bulk operation 可以和其他 bulk operation 以及写事务并发，我们先来看整个 bulk operation 的 MVCC 是如何做的。
 
 ### Versioning Protocol
 
-**虚拟版本（virtual version）**：bulk operation 产生的数据版本称为虚拟版本，bulk operation 仅会生成 created 和 deleted 两种虚拟版本，内存中正常事务产生的数据版本称为物理版本（physical version）
+**虚拟版本（virtual version）**：bulk operation 产生的数据版本称为虚拟版本，bulk operation 仅会生成 created 和 deleted 两种虚拟版本，内存中常规事务产生的数据版本称为物理版本（physical version）
 
 **epoch**：Umbra 维护一个全局单调递增的 epoch 生成器，epoch 的范围在 0 到 2^64-1 之间。每个常规事务和 bulk operation 开始时都会获取 start epoch，bulk operation 所产生的数据虚拟版本就是它的 start epoch 值。常规事务获取的是最近已分配的 epoch，而 bulk operation 获取是下一个未分配的 epoch，当 bulk operation 完成时才更新全局 epoch 到它刚才获取的这个 start epoch。这个全局 bulk operation epoch 每次系统重启前都会持久化到磁盘，epoch 计数器的推进也需要记 WAL 确保 durability。
 
@@ -106,7 +104,7 @@ Umbra 在实现上尽可能避免中心化的数据结构和操作，提升系�
 
 在这个状态下，一个 start TS 为 t1，start epoch 为 E5 的事务只会读到 A 和 C，而如果它的 start epoch 为 E6 则能读到 Y 和 C。
 
-理论上 epoch 和 transaction ts 可以使用同一个 timestamp 生成器，但有些问题需要解决。比如常规事务在提交时需要修改 version chain，把 transaction ID 改成 commit TS 后才能让数据对外可见。如果 bulk operation 也使用这个时间戳分配器，为了维护可见性约束，那么它也需要以相同的方式获取 transaction ID、start、commit TS 等时间戳，并且以相同的方式修改数据的 transaction ID 为 commit TS，这对修改大量数据的 bulk operation 说是无法忍受的。
+理论上 epoch 和 transaction TS 可以使用同一个 timestamp 生成器，但有些问题需要解决。比如常规事务在提交时需要修改 version chain，把 transaction ID 改成 commit TS 后才能让数据对外可见。如果 bulk operation 也使用这个时间戳分配器，为了维护可见性约束，那么它也需要以相同的方式获取 transaction ID、start、commit TS 等时间戳，并且以相同的方式修改数据的 transaction ID 为 commit TS，这对修改大量数据的 bulk operation 说是无法忍受的。
 
 ### 同步
 
@@ -137,11 +135,9 @@ Umbra 在实现上尽可能避免中心化的数据结构和操作，提升系�
 
 ### Serializability
 
-这篇论文提供的 MVCC 能够满足 SI 隔离级别。在此基础上通过 Neumann 在《[Fast Serializable Multi-Version Concurrency Control for Main-Memory Database Systems](https://db.in.tum.de/~muehlbau/papers/mvcc.pdf)》中提出的方法可以进一步实现 Serializable 隔离级别。
+这篇论文提供的 MVCC 能够满足 SI 隔离级别。在此基础上通过《[Fast Serializable Multi-Version Concurrency Control for Main-Memory Database Systems](https://db.in.tum.de/~muehlbau/papers/mvcc.pdf)》（同样来自 TUM，2015 年发表在 SIGMOD）中提出的方法可以进一步实现 Serializable 隔离级别。
 
 ## 实验结果
-
-#### System Comparaison
 
 作者采用了 TATP 和 TPC-C 两个 OLTP 测试集分别测试重读和重写两个场景，测试中尽量调整 PG 和其他系统的配置使其发挥最佳性能，采用足够大的物理内存使大家尽量在内存中完成事务。从结果看，论文中提出的方法在性能上相比 PG 等有几乎 1 个数量级的优势：
 
