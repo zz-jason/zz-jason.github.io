@@ -10,7 +10,7 @@ categories: ["Paper Reading"]
 
 TUM 在 HyPer 后开始了基于 SSD 的数据库系统研究，一开始的项目叫 LeanStore（LeanStore 采用定长 page），Umbra 是在 LeanStore 的基础上直接演进出来的，许多技术设计和 LeanStore 差不多，建议大家在看 Umbra 的时候也提前看看 LeanStore 的论文，一些技术实现在 LeanStore 中会讲的更细。
 
-这篇文章假设大家已经对 LeanStore 比较熟悉了，不了解 LeanStore 的朋友也可以看看我之前写的这篇文章：TODO
+这篇文章假设大家已经对 LeanStore 比较熟悉了，不了解 LeanStore 的朋友也可以看看我之前写的这篇文章：[[ICDE 2018] LeanStore: In-Memory Data Management Beyond Main Memory](https://zhuanlan.zhihu.com/p/619669465)。
 
 ## Buffer Manager
 
