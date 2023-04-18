@@ -6,75 +6,57 @@ categories: ["Paper Reading"]
 
 ## 简介
 
-这篇论文主要介绍了 TUM 研发的基于 SSD 的通用数据库 Umbra，可以在不牺牲性能的情况下处理任意大小的数据集。它被 TUM 看做是内存数据库 HyPer 的继任者。Umbra 有很多关键实现，比如采用不定长 page 并为其针对性设计实现了 buffer manager，采用了 pointer swizzling、versioned latch 等优化提升 Umbra 在多核上的 scalability，实现了高效的 log 和 recover 算法，和 HyPer 一样采用代码生成等。
+这篇论文介绍了 TUM 的通用数据库 Umbra，它基于 SSD，能高效处理任意大小的数据集，是内存数据库 HyPer 的继任者。Umbra 的关键实现包括：不定长 page 和专用 buffer manager，pointer swizzling 和 versioned latch 等多核优化，高效的 log 和 recover 算法，代码生成等。
 
-TUM 在 HyPer 后开始了基于 SSD 的数据库系统研究，一开始的项目叫 LeanStore（LeanStore 采用定长 page），Umbra 是在 LeanStore 的基础上直接演进出来的，许多技术设计和 LeanStore 差不多，建议大家在看 Umbra 的时候也提前看看 LeanStore 的论文，一些技术实现在 LeanStore 中会讲的更细。
-
-这篇文章假设大家已经对 LeanStore 比较熟悉了，不了解 LeanStore 的朋友也可以看看我之前写的这篇文章：[[ICDE 2018] LeanStore: In-Memory Data Management Beyond Main Memory](https://zhuanlan.zhihu.com/p/619669465)。
+Umbra 是 LeanStore（基于 SSD 的定长 page 数据库）的演进，两者有许多相似之处。建议看 Umbra 前先看 LeanStore 的论文，或者看我写的这篇文章：[[ICDE 2018] LeanStore: In-Memory Data Management Beyond Main Memory](https://zhuanlan.zhihu.com/p/619669465)。
 
 ## Buffer Manager
 
 ![Figure 1](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304021024851.png)
 
-LeanStore 已经实现了足够高效的 Buffer Manager，但可惜它管理的 page 是定长的，虽然性能优异，但基于定长 page 开发的系统会引入额外的机制来处理可变大小的 tuple，带来了额外的系统复杂性和性能开销。
+LeanStore 的 Buffer Manager 管理定长 page，虽然高效，但需要额外处理可变大小的 tuple，增加系统复杂性和性能开销。
 
-Umbra 选择了变长 page，如上图所示，Umbra 的 Buffer manager 将 page 分为不同的 size class 进行管理，不同 size class 的 page 大小不同，最小的 size class 是 64 KB，size class i+1 的 page 大小是 size class i 的 2 倍，这样倍增上去，最大的 page 可以把整个 buffer pool 装下。
-
-Buffer Manager 只有一个全局 Buffer Pool，管理所有的 size class。整个 Buffer Pool 的可用内存是整体配置的，不需要单独为每个 size class 配置内存容量。初始默认 Buffer Pool 只能使用可用内存的 50%，剩下的一半供查询执行使用。
+Umbra 的 Buffer Manager 管理变长 page，如图所示，page 按 size class 分类，每个 size class 的 page 大小是前一个的 2 倍。最小 64 KB，最大能覆盖整个 Buffer Pool。Buffer Manager 只有一个 Buffer Pool，管理所有 size class。Buffer Pool 的内存容量是全局配置的，不需为每个 size class 单独配置。默认情况下，Buffer Pool 只用可用内存的 50%，剩下的给查询执行。
 
 ### Buffer Pool Memory Management
 
-Buffer Pool 中支持多个 size class 的主要挑战就是如何解决内存碎片化的问题。
+内存碎片化是 Buffer Pool 支持多个 size class 的主要挑战。
 
-Umbra 通过操作系统的虚拟地址和物理地址映射来解决这个问题。操作系统通过页表将用户的虚拟内存地址转换为实际的物理地址。这使得连续的虚拟内存可以分散的存储在碎片化的物理内存中，同时虚拟内存分配也可以和物理内存分配解耦开，用户程序可以在不实际分配物理内存以及不建立虚拟内存到物理内存地址映射的情况下分配一块虚拟内存。
+Umbra 通过操作系统的虚拟地址和物理地址映射来解决这个问题。操作系统通过页表将用户的虚拟内存地址转换为实际的物理地址。这样，连续的虚拟内存可以分散地存储在碎片化的物理内存中，同时虚拟内存分配也可以和物理内存分配解耦开，用户程序可以在不实际分配物理内存以及不建立虚拟内存到物理内存地址映射的情况下分配一块虚拟内存。
 
 Umbra 的 Buffer Manager 使用 mmap 来实现上述目标。具体来说，每个 size class 都被分配了一个足够装下整个 buffer pool 大小的虚拟内存，通过配置 mmap 系统调用使其仅分配虚拟内存地址不分配实际物理内存，然后将每个 size class 内的虚拟内存按照 page size 切分成一个个 chunk，每个 buffer frame 都包含一个指向对应 chunk 的内存指针。这些内存指针创建出来后就不再改变，后续 buffer manager 在需要时就将 page 从磁盘加载到这个虚拟内存地址对应的物理内存中。
 
-**物理内存分配**：Umbra 通过 pread 系统调用将磁盘上的 page 数据读到 buffer frame 中，此时操作系统才会实际分配物理内存（可能不连续），创建虚拟地址到这些物理内存地址的映射关系。
+**物理内存分配**：Umbra 用 pread 读磁盘 page 到 buffer frame，操作系统分配物理内存（可能不连续），建立虚拟地址和物理地址的映射。
 
-**物理内存释放**：当 page 从 buffer pool 中剔除时，Umbra 先通过 pwrite 系统调用将 buffer frame 中的数据写回磁盘文件，然后通过 madvise 系统调用传入 MADV_DONTNEED 标志，让操作系统回收掉 buffer frame 背后的物理内存。因为一开始的 mmap 系统调用没有实际映射磁盘文件，madvise 系统调用的开销可以忽略。
+**物理内存释放**：Umbra 用 pwrite 写 buffer frame 到磁盘文件，用 madvise 传 MADV_DONTNEED 标志，让操作系统回收物理内存。因为 mmap 没映射磁盘文件，madvise 开销很小。
 
-Buffer Manager 会在运行中追踪整体的物理内存使用情况确保 buffer pool 不超过配置的容量。Umbra 采用了和 LeanStore 相同的缓存替换策略，内存 page 会先放入 cooling stage 的 FIFO 队列头部，到达队列末尾时才从内存驱逐。
+Buffer Manager 跟踪物理内存使用情况，保证 buffer pool 不超配置容量。Umbra 和 LeanStore 的缓存替换策略相同，内存 page 先进 cooling stage 的 FIFO 队列头，到队列尾再驱逐。
 
 ### Pointer Swizzling
 
 ![Figure 2: Illustration of a swizzled (top) and unswizzled (bot- tom) swip](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304022007177.png)
 
-由于页面需要序列化到磁盘中，因此在一般情况下需要通过 page ID（PID）而不是内存指针来引用它们。传统的做法是采用一个全局哈希表来存储 page ID 和其对应的内存指针，每次读写 page 时都需要获取 latch 以访问这个全局哈希表，并发很高时会有很大的 latch contention，使其成为主要性能瓶颈。
+为了把页面序列化到磁盘中，页面不能用内存指针而要用 page ID（PID）来引用。一种常见的方法是用一个全局哈希表来映射 page ID 和内存指针，但这样每次访问页面都要获取 latch 来操作哈希表，会导致 latch contention 的性能问题。
 
-不同的是 Umbra 采用了变长 page，每个 page 位于不同的 size class 中，需要将 size class 也编码进 Swip 存储的内存地址中。
+和 LeanStore 一样，Umbra 采用了 pointer swizzling 来解决这个问题。pointer swizzling 是一种在序列化和反序列化时把基于名字或位置的引用转换成直接的内存地址的过程。Umbra 的每个页面都有一个 Swip 来访问子节点，Swip 是一个 64 位整数，最低位是 0 表示它是内存指针，最低位是 1 表示它是 page ID（需要从 cooling stage 或磁盘中加载页面）。
 
-和 LeanStore  一样，Umbra 采用了 pointer swizzling 的方案来解决这个问题。内存中每个 page 通过 Swip 来访问子节点。Swip 是一个 64 位整数，最低位是 0 表示它是内存指针，最低位是 1 表示它是 page ID（对应的 page 需要 buffer manager 从 cooling stage 拿出来或从磁盘加载上来）。对于表示 page ID 的 Swip，Umbra 使用额外的 6 比特来表示其所属的 size class，剩余的 57 比特用来表示实际 page ID，也就是说 page ID 的范围是 0 到 2^57-1，也足够用了。
-
-和 LeanStore 一样，Umbra 要求每个页面仅有一个 Swip，方便缓存替换更新 Swip 值。
+对于 page ID 的 Swip，Umbra 还用了 6 比特来表示页面所属的 size class，因为 Umbra 使用了变长页面。剩下的 57 比特表示实际的 page ID，范围是 0 到 2^57-1。Umbra 要求每个页面只有一个 Swip，方便缓存替换时更新 Swip 值。
 
 ### Versioned Latches
 
 ![Figure 3: Structure of the versioned latch stored in a buffer frame for synchronization of page accesses](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304022008208.png)
 
-和 LeanStore 一样，Umbra 采用了 optimistic latch 机制来尽可能避免 latch contention。不一样的是，Umbra 这里采用一个 64 位整数的原子变量实现了 versioned latch，这个 versioned latch 支持采用 exclusive、shared 或 optimistic 的模式上锁。
+Umbra 用一个 64 位整数的原子变量实现了 versioned latch，支持 exclusive、shared 和 optimistic 三种上锁模式，以减少 latch contention。versioned latch 的 5 比特位表示锁的状态，0 为无锁，1 为 exclusive 锁，2 及以上为 shared 锁。shared 锁允许多个线程同时读取被保护的数据，exclusive 锁则只允许一个线程读写。versioned latch 的剩余 59 比特位表示版本计数器，每次修改数据时递增。optimistic 模式下，线程不会真正上锁，而是通过比较数据读取前后的版本计数器来判断是否需要重试。
 
-versioned latch 的 5 比特位用于存储锁的状态，0 表示没人上锁，1 表示 exclusive 锁，2 及以上的值表示 shared 锁。这里的 excluseive 和 shared 的语义和 RWMutex 等价。在没有被其他线程以 exclusive 模式锁定时才可以 shared 模式上锁才会成功。shared 模式下的状态位的值 -1 表示有多少个线程以 shared 模式持有该 latch，如果所有的 5 个比特还存不下，会使用额外的 64 为整数辅助存储。
+Umbra 和 LeanStore 的区别在于，Umbra 支持 shared 模式上锁，而 LeanStore 只支持 optimistic 模式。这是因为 optimistic 模式可能需要重试，对于读写比重不明或者重试代价高的数据和查询来说，性能损失太大。
 
-versioned latch 剩余的 59 位用于存储版本计数器，每次修改被保护的数据，都需要递增计数器的值。这样当某个线程以 exclusive 模式上锁修改完 page 后，其他以 optimistic 模式上锁（实际上不会修改这个原子变脸）线程通过比对数据读取前后锁版本，锁版本发生了变化表明他们读取的 page 在这期间发生了变化，需要重试该 page 上的读操作。
-
-和 LeanStore 一样，shared 模式下只能读不能修改 page，如果一个 page 被至少 1 个线程以 shared 模式上锁读，则这个 page 不能被 buffer manager 进行缓存替换。
-
-与 LeanStore 不同，Umbra 为读操作支持了 shared 模式上锁，LeanStore 仅为读支持 optimistic 模式。原因是 optimistic 模式需要验证数据读取前后的锁版本，如果锁版本发生变化需要进行重试。这种机制对于那些不清楚有多少读写比重的数据，或者对于那些重试代价高昂的 OLAP 查询来说性能损失是巨大的，不如读之前就上个 shared latch。
-
-值得注意的是 Umbra 的 versioned latch 在后面演进成了 Hybrid-Latch，发表在了 VLDB 2023 的这篇论文中，里面通过伪代码详细介绍了各个模式的 latch 实现，论文不长，推荐感兴趣的朋友阅读一下原文：《[Scalable and Robust Latches for Database Systems](https://db.in.tum.de/~giceva/papers/damon_latches.pdf?lang=de)》。
+另外 Umbra 的 versioned latch 在后面演进成了 Hybrid-Latch，在 VLDB 2023 的这篇论文中通过伪代码详细介绍了各个模式的 latch 实现，论文不长，感兴趣朋友阅读一下：《[Scalable and Robust Latches for Database Systems](https://db.in.tum.de/~giceva/papers/damon_latches.pdf?lang=de)》。
 
 ### Buffer-Managed Relations
 
-Umbra 中的 tuple 存储在 B+ 树中，使用固定 8 字节的 tuple ID 作为 Key，tuple ID 严格单调递增。这样的 8 字节 key 设计使得 Umbra 内部节点始终使用最小可用页面大小（64 KiB），扇出固定为 8192，使得插入任意 tuple 的处理效率都差不多。
+Umbra 用 B+ 树存储 tuple，用单调递增的 8 字节 tuple ID 作为 Key。这样内部节点固定为 64 KiB，扇出为 8192，插入效率均匀。只有当 tuple 超过现有 page 容量时，才会分配新的叶子节点，一般都是 64 KiB。tuple 采用 PAX 格式，固定大小字段列式存储在页面开头，可变大小字段密集存储在页面末尾，插入时可压缩。这种页面布局下，获取部分字段可能导致所有字段都加载到内存中，Umbra 未来计划在将来进行优化，比如用 DataBlock 格式（参考：《[Data Blocks: Hybrid OLTP and OLAP on Compressed Storage using both Vectorization and Compilation](https://db.in.tum.de/downloads/publications/datablocks.pdf)》）优化冷数据。
 
-Umbra 只有在插入的 tuple 无法放入现有 page 时才会分配新的叶子结点，在能够容纳整个 tuple 的最小 size class 中分配 page，一般 tuple 不会很大，基本都会分配到 64 KiB 的 page。Umbra 中大多数叶子页面都是 64 KiB，有效的平衡了点查和范围查的读性能。
-
-Umbra 采用 PAX 的格式组织元组：固定大小的字段以列式布局存储在页面的开头，而可变大小的字段则密集的存储在页面的末尾，在插入的时候可以按需进行 compaction。这种页面布局对于存储在磁盘上的数据并不是最优的，获取部分字段可能导致所有字段都加载到内存中，Umbra 计划在将来使用其他方案进行优化，比如冷数据采用 Hyper 中的 DataBlock 格式，参考：《[Data Blocks: Hybrid OLTP and OLAP on Compressed Storage using both Vectorization and Compilation](https://db.in.tum.de/downloads/publications/datablocks.pdf)》。
-
-B+ 树的并发访问通过对 buffer frame 上的 versioned latch 进行 optimistic latch coupling 完成。写线程以 exclusive 模式获取 versioned latch，拆分内部页面或将元组插入到叶子页面中，读线程以 shared 模式获取 versioned latch，从叶子页面中读取 tuple 或从磁盘加载子页面。在非修改遍历期间，以 optimistic 模式获取 versioned latch。
-
-因为 B+ tree 不再有指向兄弟节点的指针了，Umbra 根据 fence key 实现 range scan。而在 range scan 期间，为了避免代价高昂的读重试，以及不必要的整树遍历，读线程会维护父节点的 optimistic latch，当父节点的 optimistic versioned latch 没有发生变化时，读完一个叶子结点后就可以直接从父节点开始读兄弟叶子结点。
+B+ 树的并发访问通过 versioned latch 实现的 optimistic latch coupling 完成。写线程通过 exclusive latch 修改内部或叶子节点，读线程通过 shared latch 读取叶子节点或加载子节点。非修改遍历用 optimistic latch。Umbra 的 B+ 树节点没有兄弟指针，通过 fence key 实现了 range scan。为避免重试和整树遍历，读线程持有父节点的 optimistic latch，读完一个叶子节点后尽量直接从父节点读兄弟节点。
 
 ### Recovery
 
@@ -86,7 +68,7 @@ Umbra 解决思路比较简单，仅在 size class 内部支持磁盘空间复�
 
 ## Further Considerations
 
-Umbra 最大的特点就是变长 page 和对应的 buffer manager。其他模块都需要在这个基础上进行或多或少的适配工作，尤其是字符串和统计信息收集。
+Umbra 采用了变长 page，实现了对应的 buffer manager。其他模块都需要在这个基础上进行适配，论文提了字符串和统计信息收集两个方面。
 
 ### String Handling
 

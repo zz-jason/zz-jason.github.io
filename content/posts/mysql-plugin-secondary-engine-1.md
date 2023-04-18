@@ -26,8 +26,6 @@ Demo：初步体验 MySQL Secondary Engine
 
 ## 2. MySQL plugin fragmework
 
-
-
 MySQL 有着强大的 Plugin 机制，比如审计日志、查询改写，链接管理等，在 MySQL 源码中的 plugin 目录中我们能看到非常多的 plugin 实现样例，而 Secondary Engine 也是通过 MySQL 的 Plugin 机制实现的。
 
 实现一个插件，只需要使用 `mysql_declare_plugin` 这个宏，定义好插件的名字，以及相关接口的函数指针即可.
