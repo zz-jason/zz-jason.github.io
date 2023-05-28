@@ -7,8 +7,6 @@ draft: true
 
 MySQL 8.0.31 引入了 Hypergraph Join Optimizer，它用超图表示多表 Join，每个边连接任意个表，直接表示复杂的 Join Predicate，避免了无用的 Cross Join。它采用了《Dynamic Programming Strikes Back》中的 DPhyp 方法进行 Join Reorder，能够更好地优化多表 Join 的性能和成本。
 
-我对这个新特性非常感兴趣，就读了《Dynamic Programming Strikes Back》这篇论文，并整理了一些 Hypergraph Join Order 算法的思路和效果，希望对读者朋友们有帮助。
-
 
 ## 为什么要引入 Hypergraph Join Order 算法
 
