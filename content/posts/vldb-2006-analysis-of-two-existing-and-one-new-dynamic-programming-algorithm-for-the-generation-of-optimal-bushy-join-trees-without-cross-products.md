@@ -6,21 +6,21 @@ categories: ["Paper Reading"]
 
 ## INTRODUCTION
 
-这篇论文先分析了 DPsize 和 DPsub 这两个常用的 join reorder 算法，发现它们在枚举 DP 使用的 csg-cmp-pair 时并不高效，实际时间复杂度远高于理论时间复杂度。作者提出了一种高效的 csg-cmp-pair 的枚举算法和对应的 DPccp 算法，使得每个 csg-cmp-pair 仅被枚举一次，在各种类型的 join graph 和 join size 下都能表现出良好的 DP 性能。
+《[Analysis of Two Existing and One New Dynamic Programming Algorithm for the Generation of Optimal Bushy Join Trees without Cross Products](https://www.researchgate.net/profile/Thomas_Neumann2/publication/47861835_Analysis_of_Two_Existing_and_One_New_Dynamic_Programming_Algorithm_for_the_Generation_of_Optimal_Bushy_Join_Trees_without_Cross_Products/links/0912f506d90ad19031000000.pdf)》这篇论文先分析了 DPsize 和 DPsub 这两个常用的 join reorder DP 算法，发现它们在枚举 DP 使用的 csg-cmp-pair 时并不高效，实际时间复杂度远高于理论下界。作者提出了一种高效的 csg-cmp-pair 的枚举算法和 DPccp 算法，使得每个 csg-cmp-pair 仅被枚举一次，在各种类型的 join graph 和 join size 下都能表现出良好的 DP 性能。
 
-Guido Moerkotte 和 Thomas Neumann 后面基于 DPccp 和 hyper graph 提出了新的 DPhyp 算法，理解这篇论文的 DPccp 算法应该也可以帮助大家更好的理解 DPhyp 算法。
+Guido Moerkotte 和 Thomas Neumann 后面基于 DPccp 和 hyper graph 提出了新的 DPhyp 算法，这篇论文对理解 DPhyp 算法也有一定帮助。
 
 ## ALGORITHMS AND ANALYSIS
 
-在讲 DPccp 之前，先看看常用的 DPsize 和 DPsub 这两个常用的 join reorder 算法，它们都能寻找到不包含 cross-product 的最优 bushy tree。
+在讲 DPccp 之前，先看看 DPsize 和 DPsub 这两个常用的 join reorder 算法，它们都能寻找到不包含 cross-product 的最优 bushy tree，只是时间复杂度不同。
 
 ### DPsize: Size-Driven Enumeration
 
-在著名的《Access Path Selection in a Relational Database Management System》这篇论文中，Selinger 提出了一种 bottom-up 的 join reorder DP 算法，它按照 join 节点数从小到大的顺序为每个 interesting order 计算出了最佳的左深树 join order。虽然 Selinger 的 join reorder 算法只考虑了左深树，但在这个算法思路的基础上可以很容易的演化出能够考虑 bushy tree 的 DPsize 算法，伪代码如下所示：
+在著名的《[Access Path Selection in a Relational Database Management System](https://courses.cs.duke.edu/compsci516/cps216/spring03/papers/selinger-etal-1979.pdf)》这篇论文中，Selinger 提出了一种 bottom-up 的 join reorder DP 算法，它按照 join 节点数从小到大的顺序为每个 interesting order 计算出了最佳的左深树 join order。虽然 Selinger 的 join reorder 算法只考虑了左深树，但在这个算法思路的基础上可以扩展出能够枚举 bushy tree 的 DPsize 算法，伪代码如下所示：
 ![Figure 1: Algorithm DPsize](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305261913463.png)
 DPsize 的思路简单直接：将 n 个表的 join order 问题分解成 k 和 n-k 个表的子问题。包含 1  个表的最佳 join order 就是该表本身，这是 DP 的初始解。然后从小大到大计算每个 join size 下的最佳 join order。在计算包含 s 个表的 join order 时，通过枚举所有 s1+s2=s 的 s1 和 s2 各自的最佳 join order 来确定包含 s 个表的最佳 join order。
 
-值得注意的是这里面的两个 counter。一个是 InnerCounter，它描述了该算法的时间复杂度，一个是 CsgCmpPairCounter，它描述了该算法枚举的所有联通的 S1 和 S2，也就是有效 csg-cmp-pair 的数量。后面 DPsub 也统计了同样的 counter，便于对比分析。
+注意代码中的两个 counter。一个是 InnerCounter，它描述了该算法的时间复杂度，一个是 CsgCmpPairCounter，它描述了该算法枚举的所有联通的、有效的 csg-cmp-pair (S1, S2) 的数量。后面 DPsub 也统计了同样的 counter，便于对比分析。
 
 作者总结了 chain、cycle、star 和 clique 这 4 种 join graph 上的 InnerCounter 计算公式如下：
 
@@ -28,23 +28,23 @@ DPsize 的思路简单直接：将 n 个表的 join order 问题分解成 k 和 
 
 ### DPsub: Subset-Driven Enumeration
 
-DPsub 起源于 Vance 和 Maier 在《Rapid Bushy Join-order Optimization with Cartesian Products》这篇论文提出的 join reorder 算法。原算法考虑了 cross-product，但因为 cross-product 极大的增加了 join order 的搜索空间，作者将其修改为不考虑 cross-product，得到了下面 DPsub 的伪代码：
-![Figure 2: Algorithm DPsub](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305262042392.png)
-DPsub 是一种状态压缩 DP。它利用一个 32 或 64 位整数来表示所有参与 join 的表。整数的第 i 位为 0 或 1 分别代表第 i 个表是否参与 join。熟悉状态压缩 DP 和位运算的朋友们理解这个算法会比较容易。
+DPsub 起源于 Vance 和 Maier 在《[Rapid Bushy Join-order Optimization with Cartesian Products](https://dl.acm.org/doi/pdf/10.1145/235968.233317)》这篇论文提出的 join reorder 算法。原算法考虑了 cross-product，但因为 cross-product 极大的增加了 join order 的搜索空间，作者将其修改为不考虑 cross-product，得到了下面 DPsub 的伪代码：
 
-每个整数 i 都代表了一个节点子集，状态 i 代表的点集用 S 表示，只对那些联通的点集 S 计算最佳 join order。在计算时依次枚举 S 的所有子集 S1 和对应的补集 S2=S\\S1，根据他们的最佳 join order 得到点集 S 的最佳 join order。
+![Figure 2: Algorithm DPsub](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305262042392.png)
+
+DPsub 是一种状态压缩 DP。它利用一个整数的各个比特位来表示有哪些表参与 join（第 i 位为 0 或 1 分别代表第 i 个表是否参与 join）。熟悉状态压缩 DP 和位运算的朋友们应该比较容易理解这个算法。
+
+每个整数 i 都代表了一个节点子集，也就是一个 DP 状态。状态 i 代表的点集用 S 表示，只对那些联通的点集 S 计算最佳 join order。在计算时依次枚举 S 的所有子集 S1 和对应的补集 S2=S\\S1，根据他们的最佳 join order 得到点集 S 的最佳 join order。
 
 从 1 到 2^n-1 递增的枚举所有可能的 DP 状态，这样的枚举方式可以保证在计算状态 i 的最优解时，i 的所有子状态已经在之前的枚举过程中计算出来了，状态 i 的最优解可以根据这些最优子状态计算出来。
 
-作者总结了 chain、cycle、star 和 clique 这 4 种 join graph 上的 InnerCounter 计算公式如下：
+同样的，作者总结了 chain、cycle、star 和 clique 这 4 种 join graph 上的 InnerCounter 计算公式如下：
 
 ![InnerCounter for DPsub](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305271610327.png)
 
 ### Algorithm-Independent Results
 
-csg-cmp-pair：csg 是 connected subgraph 的缩写，cmp 是 complement 的缩写，如果 S1 和 S2 是两个不相交的联通子图，并且在 S1 中的某个节点 v1 和 S2 中的某个节点 v2 有一条边（也就是 join predicate），那么就说 (S1, S2) 是一个 csg-cmp-pair。另外子图和补图关系是相互的，(S2, S1) 也是一个 csg-cmp-pair。
-
-我们把 query graph 中 csg-cmp-pair 的个数用 \#ccp 表示。\#ccp 有一些非常重要的性质：
+csg-cmp-pair：csg 是 connected subgraph 的缩写，cmp 是 complement 的缩写，如果 S1 和 S2 是两个不相交的联通子图，并且在 S1 中的某个节点 v1 和 S2 中的某个节点 v2 有一条边（也就是 join predicate），那么就说 (S1, S2) 是一个 csg-cmp-pair。另外子图和补图关系是相互的，(S2, S1) 也是一个 csg-cmp-pair。把 query graph 中 csg-cmp-pair 的个数用 \#ccp 表示。\#ccp 有一些非常重要的性质：
 1. 它是 query graph 的固有属性，和具体的 join reorder 算法无关，query graph 决定了 \#ccp
 2. 它是所有正确的 join reorder 算法中 CreateJoinTree 调用次数的下界，也就是 join reorder 算法的时间复杂度下界。
 
@@ -61,13 +61,15 @@ csg-cmp-pair：csg 是 connected subgraph 的缩写，cmp 是 complement 的缩�
 
 ## THE NEW ALGORITHM DPCCP
 
+作者在这个章节详细介绍了能够快速且不重复的枚举所有 csg-cmp-pair 的 DPccp 算法，并利用图论和数学证明方法证明了这个枚举算法的正确性。
+
 ### Problem Statement
 
 因为要解决的是 DPsize 和 DPsub 这两个 join reorder 算法枚举了大量不联通的子图的问题，因此 DPccp 的目标就变成了如何高效的枚举所有联通的 csg-cmp-pair 一次且仅一次，以达到 DP 算法理论时间复杂度的下界 \#ccp，同时也有一些限制条件：
 1. csg-cmp-pair 的枚举顺序需要能够用来进行 DP，也就是当枚举到 (S1, S2) 这样的 csg-cmp-pair 时，S1 和 S2 各自所有的 csg-cmp-pair 都已经枚举过了。
 2. 另外是生成 csg-cmp-pair 的开销需要是常数级别，或者至少是线性级别，这样才能在时间复杂度上优于 DPsize 或 DPsub。
 
-如果能够顺利的枚举所有 csg-cmp-pair (S1, S2)，那么就可以根据 S1 和 S2 各自的最佳 plan 计算 S 的最佳 plan，也就是这篇论文提出的 DPccp 算法，伪代码如下所示：
+枚举所有 csg 的伪代码如下所示，入口函数是 EnumerateCsg，辅助函数是 EnumerateCsgRec，Rec 应该是 recursive 的意思，隐含着该函数会不断被递归调用的信息：
 
 ![Figure 4: Algorithm DPccp](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305262231525.png)
 
@@ -107,7 +109,7 @@ EnumerateCmp 的伪代码如下所示，其中 Bi(N) 指的是点集 N 中所有
 
 ### Correctness Proof
 
-整个 DPccp 算法的正确性是由这个 csg-cmp-pair 枚举算法的正确性来保证的，作者在这一章节花了比较长的篇幅严谨的证明 csg-cmp-pair 枚举算法的正确性，篇幅所限这里不再展开，感兴趣的朋友可以阅读原文。
+整个 DPccp 算法的正确性是由这个 csg-cmp-pair 枚举算法的正确性来保证的，作者在这一章节花了比较长的篇幅严谨的证明了 csg-cmp-pair 枚举算法的正确性，篇幅所限这里不再展开，感兴趣的朋友可以阅读原文。
 
 ## EVALUATION
 
