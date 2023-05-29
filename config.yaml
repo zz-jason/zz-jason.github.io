@@ -1,6 +1,6 @@
 baseURL: 'https://zz-jason.github.io/'
 title: Jian Zhang
-paginate: 5
+paginate: 10
 enableEmoji: true
 hasCJKLanguage: true
 googleAnalytics: "UA-67872953-1"
@@ -39,7 +39,7 @@ Params:
   # for homepage
   homeInfoParams:
     # Title:
-    Content: "Why did you want to climb Mount Everest?\n\nBecause it’s there."
+    Content: "We always overestimate the change that will occur in the next two years and underestimate the change that will occur in the next ten. Don’t let yourself be lulled into inaction"
     # socialIcons:
     #   - name: twitter
     #     url: "https://twitter.com/zhangjian1012"

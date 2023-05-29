@@ -1,0 +1,46 @@
+.main {
+    position: relative;
+    min-height: calc(100vh - var(--header-height) - var(--footer-height));
+    max-width: calc(var(--main-width) + var(--gap) * 2);
+    margin: auto;
+    /* padding: var(--gap) */
+    padding: 0em 0.8em 0.8em 0.8em;
+}
+
+.page-header h1 {
+    font-size: 40px
+}
+
+.pagination {
+    display: flex
+}
+
+.pagination a {
+    color: var(--theme);
+    font-size: 13px;
+    line-height: 36px;
+    background: var(--primary);
+    border-radius: calc(36px / 2);
+    padding: 0 16px
+}
+
+.pagination .next {
+    margin-inline-start: auto
+}
+
+.social-icons {
+    padding: 0.5em 0
+}
+
+.social-icons a:not(:last-of-type) {
+    margin-inline-end: 1.0em
+}
+
+.social-icons a svg {
+    height: 26px;
+    width: 26px
+}
+
+code {
+    direction: ltr
+}
