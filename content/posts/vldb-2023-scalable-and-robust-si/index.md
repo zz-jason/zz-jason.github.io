@@ -8,7 +8,7 @@ categories: ["Paper Reading", "MVCC"]
 
 这篇论文提出了一种能够避免 long-running OLAP query 影响 OLTP 事务、在多核 CPU 上 scale、支持 out-of-memory workload 的 MVCC 实现机制。
 
-![https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304110017200.png](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304110017200.png)
+![](202304110017200.png)
 
 长时间运行的 OLAP 查询会严重影响 OLTP 事务延迟。例如上图，在 TPC-C 开始 10 秒后执行一个 sleep 语句，之后 WiredTiger 和 PostgreSQL 的 TPC-C 的性能都出现了大幅下跌，下跌幅度取决于 GC 激进和精确程度。
 
@@ -22,7 +22,7 @@ categories: ["Paper Reading", "MVCC"]
 
 ## 系统设计概览
 
-![https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304110954551.png](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304110954551.png)
+![](202304110954551.png)
 
 上图是作者提出的 MVCC 系统设计概览，总的来说可以分为如下几个方面：
 
@@ -45,7 +45,8 @@ LCB 是 Last Committed Before 的简称，LCB(w, ts) 表示工作线程 w 在 ts
 1. 仅在遇到其他 worker 写的数据版本（数据的版本信息中包含 worker id）时才去向对应的 worker 获取 LCB，避免获取无用的 LCB。
 2. 把获取到 LCB(wi, start ts) 缓存在 thread-local 的 snapshot cache 中，后面再遇到 worker wi 写的其他数据版本时就不再重复向该 worker 获取 LCB，而是直接读取 snapshot cache。
 
-![https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304212027428.png](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304212027428.png)
+![](202304212027428.png)
+
 上图是根据 start ts、snapshot cache、LCB 进行可见性检查的伪代码，其中：
 * tuple_ts_start 表示该 tuple 的版本号，tuple_w_i 表示写入该版本的 worker id。
 - isVisible() 里第 1 个 if 语句先检查这个数据版本是否是当前 worker 写入的，是的话那肯定可见
@@ -64,7 +65,7 @@ Commit Log 会被并发读写，因此也需要合适的线程间同步机制。
 
 ## Garbage Collection
 
-![https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304212109238.png](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304212109238.png)
+![](202304212109238.png)
 
 为了解决因长时间运行的 OLAP 查询导致 MVCC 版本堆积而拖慢 OLTP 事务的问题，作者通过优化器将查询分为 OLAP 和 OLTP，并维护了 oldest_tx 和 oldest_oltp 这两个 watermark。它们分别表示最老的 OLAP 事务和最老的 OLTP 事务的 start ts。这样就可以对 newest_olap 到 oldest_oltp 之间的版本进行 Cooperative GC（每个 worker 回收自己创建的位于 LCB(w, oldest_tx or oldest_oltp) 之间的 MVCC 版本），从而避免长时间运行的 OLAP 事务对 OLTP 事务的影响。
 
@@ -76,7 +77,7 @@ Commit Log 会被并发读写，因此也需要合适的线程间同步机制。
 
 ### Graveyard Index
 
-![https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304212341883.png](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304212341883.png)
+![](202304212341883.png)
 
 因为被 tombstone 标记删除的数据只对那些 long-running OLAP query 可见，对那些 start ts 更大的 OLTP 事务不可见。因此作者引入了一个额外的 graveyard index 数据结构来存储这样的 tombstone，只要 tombstone 的 start ts 小于 oldest_oltp 就将其从 main index 移到 Graveyard Index。
 
@@ -84,7 +85,7 @@ OLAP query 需要同时查询 main index 和 Graveyard Index 来获取所有可�
 
 ### Tombstone Index
 
-![https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304212342342.png](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304212342342.png)
+![](202304212342342.png)
 
 为了知道有哪些 tombstone 并及时对它们进行 GC，作者以去中心化的方式在每个 worker 上维护了一个 Tombstone Index。Tombstone Index 是一个 append-optimized B+ tree，key 由 start ts、command id 组成，value 为该 tombstone 的 tuple key。根据 oldest_tx 以及 oldest_oltp 这两个 watermark 确定 Tombstone Index 中的 tombstone 是应该直接删掉还是从 main index 转移到 graveyard index。
 
@@ -94,7 +95,7 @@ OLAP query 需要同时查询 main index 和 Graveyard Index 来获取所有可�
 
 ### Delta Index
 
-![https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304220931386.png](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304220931386.png)
+![](202304220931386.png)
 
 如上图所示，默认情况下所有老版本数据都存储在每个 worker 线程的 Delta Index 中，main index 只存储最新版本的 tuple 和其 version chain 的一些 metadata，这些 metadata 包括：
 
@@ -104,7 +105,7 @@ OLAP query 需要同时查询 main index 和 Graveyard Index 来获取所有可�
 
 ### FatTuple
 
-![https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304220951672.png](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304220951672.png)
+![](202304220951672.png)
 
 当 tuple 被频繁更新时会被自动转换为 FatTuple，把所有的数据版本 delta 都 inline 的存储在 main index 的 FatTuple 中。因为每个 FatTuple 只需要存储 \#W 个数据版本，作者在 FatTuple 的基础上实现了 on-demand precise garbage collection（OPGC），OPGC 模式下会首先将 newest_olap 到 oldest_oltp 这个 dead zone 内的 delta GC 掉，如果还没有足够的槽位再去收集所有正在运行事务的 start ts，确定所有的 dead zone 后 GC 所有不需要的 delta。关于 precise garbage collection 可以参考《Long-lived Transactions Made Less Harmful》。
 
@@ -122,9 +123,9 @@ OLAP query 需要同时查询 main index 和 Graveyard Index 来获取所有可�
 
 从作者后面的实验来看，Graveyard Index 能够显著降低 long-running OLAP query 对 TPC-C 性能的影响：
 
-![Figure 9: Graveyard technique stabilizes TPC-C with a long- running transaction](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305232344307.png)
+![Figure 9: Graveyard technique stabilizes TPC-C with a long- running transaction](202305232344307.png)
 
 而 FatTuple 的设计也使得 OLAP scan 的性能不受影响：
-![Figure 10: Scan performance](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305232348801.png)
+![Figure 10: Scan performance](202305232348801.png)
 
 后面作者还做了关于 “TPC-C + Scan: Scalability”、“Out-of-Memory Breakdown”、“Bulk Loading”、“Out-of-Memory Key/Value”、“Deterministic Execution Under Contention” 等实验，感兴趣的朋友可以详细阅读 “4 EVALUATION” 这一节，从实验结果来看整体效果不错。

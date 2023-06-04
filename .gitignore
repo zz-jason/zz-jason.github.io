@@ -1,0 +1,8 @@
+*.obsidian
+.DS_Store
+.hugo_build.lock
+
+obsidian
+resources
+drafts
+private

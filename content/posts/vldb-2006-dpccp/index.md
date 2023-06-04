@@ -21,20 +21,22 @@ Guido Moerkotte 和 Thomas Neumann 后面基于 DPccp 和 hyper graph 提出了�
 ### DPsize: Size-Driven Enumeration
 
 在著名的《[Access Path Selection in a Relational Database Management System](https://courses.cs.duke.edu/compsci516/cps216/spring03/papers/selinger-etal-1979.pdf)》这篇论文中，Selinger 提出了一种 bottom-up 的 join reorder DP 算法，它按照 join 节点数从小到大的顺序为每个 interesting order 计算出了最佳的左深树 join order。虽然 Selinger 的 join reorder 算法只考虑了左深树，但在这个算法思路的基础上可以扩展出能够枚举 bushy tree 的 DPsize 算法，伪代码如下所示：
-![Figure 1: Algorithm DPsize](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305261913463.png)
+
+![](202305261913463.png)
+
 DPsize 的思路简单直接：将 n 个表的 join order 问题分解成 k 和 n-k 个表的子问题。包含 1  个表的最佳 join order 就是该表本身，这是 DP 的初始解。然后从小大到大计算每个 join size 下的最佳 join order。在计算包含 s 个表的 join order 时，通过枚举所有 s1+s2=s 的 s1 和 s2 各自的最佳 join order 来确定包含 s 个表的最佳 join order。
 
 注意代码中的两个 counter。一个是 InnerCounter，它描述了该算法的时间复杂度，一个是 CsgCmpPairCounter，它描述了该算法枚举的所有联通的、有效的 csg-cmp-pair (S1, S2) 的数量。后面 DPsub 也统计了同样的 counter，便于对比分析。
 
 作者总结了 chain、cycle、star 和 clique 这 4 种 join graph 上的 InnerCounter 计算公式如下：
 
-![InnerCounter for DPsize](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305271609845.png)
+![](202305271609845.png)
 
 ### DPsub: Subset-Driven Enumeration
 
 DPsub 起源于 Vance 和 Maier 在《[Rapid Bushy Join-order Optimization with Cartesian Products](https://dl.acm.org/doi/pdf/10.1145/235968.233317)》这篇论文提出的 join reorder 算法。原算法考虑了 cross-product，但因为 cross-product 极大的增加了 join order 的搜索空间，作者将其修改为不考虑 cross-product，得到了下面 DPsub 的伪代码：
 
-![Figure 2: Algorithm DPsub](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305262042392.png)
+![](202305262042392.png)
 
 DPsub 是一种状态压缩 DP。它利用一个整数的各个比特位来表示有哪些表参与 join（第 i 位为 0 或 1 分别代表第 i 个表是否参与 join）。熟悉状态压缩 DP 和位运算的朋友们应该比较容易理解这个算法。
 
@@ -44,7 +46,7 @@ DPsub 是一种状态压缩 DP。它利用一个整数的各个比特位来表�
 
 同样的，作者总结了 chain、cycle、star 和 clique 这 4 种 join graph 上的 InnerCounter 计算公式如下：
 
-![InnerCounter for DPsub](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305271610327.png)
+![](202305271610327.png)
 
 ### Algorithm-Independent Results
 
@@ -54,12 +56,13 @@ csg-cmp-pair：csg 是 connected subgraph 的缩写，cmp 是 complement 的缩�
 
 作者总结了 DPsize、DPsub 在 chain、cycle、star、clique 这 4 种 join graph 上的 \#csg 和 \#ccp 的计算公式，这些公式表明了 join reorder 算法的时间复杂度下界：
 
-![csg and ccp calculation](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305271603702.jpg)
+![](202305271603702.jpg)
 
 ### Sample Numbers
 
 作者抽样计算了几个 join size 下，DPsize、DPsub 算法中 InnerCounter 以及 \#ccp 的数值，如下表所示：
-![Figure 3: Size of the search space for different graph structures](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305262135295.png)
+
+![](202305262135295.png)
 
 可以看到：DPsub 和 DPsize 在 chain、cycle、star、clique 类型的 query graph 中各有优劣，一个最大的特点是，不管 DPsize 还是 DPsub，它们的 InnerCounter 都远高于 \#ccp，代表它们在枚举 csg-cmp-pair 时有许多失败尝试，距离 DP 算法的理论复杂度下界 \#ccp 有好几个数量级的差距。因此作者就想设计一种能够达到 \#ccp 这个理论时间复杂度下界的 DP 算法，也就是后面将要介绍的 DPccp。
 
@@ -73,9 +76,9 @@ csg-cmp-pair：csg 是 connected subgraph 的缩写，cmp 是 complement 的缩�
 1. csg-cmp-pair 的枚举顺序需要能够用来进行 DP，也就是当枚举到 (S1, S2) 这样的 csg-cmp-pair 时，S1 和 S2 各自所有的 csg-cmp-pair 都已经枚举过了。
 2. 另外是生成 csg-cmp-pair 的开销需要是常数级别，或者至少是线性级别，这样才能在时间复杂度上优于 DPsize 或 DPsub。
 
-枚举所有 csg 的伪代码如下所示，入口函数是 EnumerateCsg，辅助函数是 EnumerateCsgRec，Rec 应该是 recursive 的意思，隐含着该函数会不断被递归调用的信息：
+DPccp 的伪代码如下所示，通过枚举所有的 csg-cmp-pair，逐步求解最优 join order：
 
-![Figure 4: Algorithm DPccp](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305262231525.png)
+![](202305262231525.png)
 
 ### Enumerating Connected Subsets
 
@@ -90,11 +93,12 @@ csg-cmp-pair：csg 是 connected subgraph 的缩写，cmp 是 complement 的缩�
 2. 从 csg S∪S' 出发枚举 csg 时，不再考虑 N(S)，因为这些节点也会在后面枚举的新的 S' 遍历到
 
 枚举所有 csg 的伪代码如下所示，入口函数是 EnumerateCsg，辅助函数是 EnumerateCsgRec，Rec 应该是 recursive 的意思，隐含着该函数会不断被递归调用的信息：
-![EnumerateCsg](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305262247122.png)
+
+![](202305262247122.png)
 
 下面的例子展示了该算法的执行过程，这是一个 5 节点的 join graph，已经按照 BFS 的方式从 R0 出发对节点进行编号，跟着例子走一遍可以更深刻的体会这个枚举过程：
 
-![Example](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305271632355.jpg)
+![](202305271632355.jpg)
 
 ### Enumerating Complements of Connected Subgraphs
 
@@ -106,10 +110,11 @@ EnumerateCmp 的伪代码如下所示，其中 Bi(N) 指的是点集 N 中所有
 
 然后按照节点编号从大到小遍历 S1 的 neighborhood N(S1)\\X 后的点集 N，从 N 中每个节点出发构造和 S1 相连的 csg。同样的，为了避免重复枚举 S2，每次枚举的 min(S2) 也都确保比后续要枚举的 min(S2') 要大，所以在调用 EnumerateCsgRec 时需要把 Bi(N) 也加到 X 中去。
 
-![EnumerateCmp](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305270018693.png)
+![](202305270018693.png)
 
-还是以这个 5 节点的 join graph 为例，如果 S1={R1}，那么初始化的 X={R0, R1}，它的 N={R4}，构造出的第一个 cmp 就是 {R4}，接着调用 EnumerateCsgRec(G, {R4}, {R0, R1}∪{R4}) 可以得到 {R4, R2}, {R4, R3}, {R4, R2, R3}，这 4 个 cmp 和 S1 共同构成了用于 DP 的 4 个 csg-cmp-pair。
-![Performance evaluations](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305270935143.png)
+还是以这个 5 节点的 join graph 为例，如果 S1={R1}，那么初始化的 X={R0, R1}，它的 N={R4}，构造出的第一个 cmp 就是 {R4}，接着调用 EnumerateCsgRec(G, {R4}, {R0, R1}∪{R4}) 可以得到 {R4, R2}, {R4, R3}, {R4, R2, R3}，这 4 个 cmp 和 S1 共同构成了用于 DP 的 4 个 csg-cmp-pair：
+
+![](202305270935143.png)
 
 ### Correctness Proof
 
@@ -118,6 +123,7 @@ EnumerateCmp 的伪代码如下所示，其中 Bi(N) 指的是点集 N 中所有
 ## EVALUATION
 
 作者实现和测试了 DPsize、DPsub 以及新提出的 DPccp 这 3 种 DP 算法在 chain、cycle、star 以及 clique 这 4 种 join graph 下不同 join size 的时间开销，以 DPccp 的时间为基准和 DPsize、DPsub 的时间进行了对比：
-![Performance evaluations](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202305271054522.jpg)
+
+![](202305271054522.jpg)
 
 综合来看 DPccp 在各种 join graph 以及各种 join size 情况下性能表现都很不错，是个非常不错的 join order DP 算法。

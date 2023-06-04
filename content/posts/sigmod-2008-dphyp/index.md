@@ -5,8 +5,8 @@ categories: ["Paper Reading", "Join Reorder"]
 draft: false
 ---
 
-![](featured.png)
-> 本文封面图片来自 [自然摄影师雷雨](https://space.bilibili.com/470226708/)，雷雨老师是我非常喜欢的一个摄影师，他的照片具有强烈的视觉冲击力，是我摄影路上的学习榜样。
+![](featured.jpg)
+> 本文封面图片来自 [自然摄影师雷雨](https://space.bilibili.com/470226708/)
 
 《Dynamic Programming Strikes Back》这篇论文提出了非常著名的 DPhyp 算法，能处理复杂的 join predicate，也能处理复杂的 join 算子，比如 outer join、semi join、anti join、dependent join 等。MySQL 8.0 实验性地支持了 DPhyp，我们最近的项目中也采用了 DPhyp，它有很高的实用价值，非常值得学习。
 
