@@ -1,6 +1,6 @@
 ---
 title: "[SIGMOD 2008] Dynamic Programming Strikes Back"
-date: 2023-03-01T08:00:00Z
+date: 2023-06-04T08:00:00Z
 categories: ["Paper Reading", "Join Reorder"]
 draft: true
 ---
@@ -158,7 +158,7 @@ The task of EmitCsgCmp(S1,S2) is to join the optimal plans for S1 and S2, which 
 论文着重考虑 Cycle 和 Star Query，没有考虑 Chain 和 Clique Query：
 
 > The behavior of join ordering algorithms on chains and cycles does not differ much: the impact of one additional edge is minor. Hence, we decided to use cycles as one starting point.
-> 
+>
 > Star queries have also been proven to be very useful to illustrate different performance behaviors of join ordering algorithms. Moreover, star queries are common in data warehousing and thus deserve special attention. Hence, we also used star queries as a starting point.
 >
 > The last potential candidate are clique queries. However, adding hyperedges to a clique query does not make much sense, as every subset of relations already induces a connected subgraph.
