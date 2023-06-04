@@ -1,7 +1,7 @@
 ---
 title: "[DaMoN 2020] Scalable and Robust Latches for Database Systems"
 date: 2023-04-24T00:00:00Z
-categories: ["Paper Reading"]
+categories: ["Paper Reading", "Latch"]
 ---
 
 ## Introduction

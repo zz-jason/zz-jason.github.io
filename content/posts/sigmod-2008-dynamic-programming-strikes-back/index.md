@@ -2,11 +2,13 @@
 title: "[SIGMOD 2008] Dynamic Programming Strikes Back"
 date: 2023-06-04T08:00:00Z
 categories: ["Paper Reading", "Join Reorder"]
-draft: true
+draft: false
 ---
 
-MySQL 8.0.31 引入了 Hypergraph Join Optimizer，它用超图表示多表 Join，每个边连接任意个表，直接表示复杂的 Join Predicate，避免了无用的 Cross Join。它采用了《Dynamic Programming Strikes Back》中的 DPhyp 方法进行 Join Reorder，能够更好地优化多表 Join 的性能和成本。
+![](featured.png)
+> 本文封面图片来自 [自然摄影师雷雨](https://space.bilibili.com/470226708/)，雷雨老师是我非常喜欢的一个摄影师，他的照片具有强烈的视觉冲击力，是我摄影路上的学习榜样。
 
+《Dynamic Programming Strikes Back》这篇论文提出了非常著名的 DPhyp 算法，能处理复杂的 join predicate，也能处理复杂的 join 算子，比如 outer join、semi join、anti join、dependent join 等。MySQL 8.0 实验性地支持了 DPhyp，我们最近的项目中也采用了 DPhyp，它有很高的实用价值，非常值得学习。
 
 ## INTRODUCTION
 
@@ -35,8 +37,7 @@ Hypergraph 由 Hypernode 和 Hyperedge 构成：
 
 需要注意的是，上面的 join predicate 可以被优化器改写为 R1.a + R2.b = R4.d + R5.e + R6.f - R3.c，它代表的 hyperedge 连接了 {R1, R2} 和 {R3, R4, R5, R6} 这两个 hypernode，在进行 join reorder 构造 hyper graph 时，所有这些优化器转换后的 join predicate 都需要加入到 hyper graph 中。
 
-![Sample Hypergraph](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303040026259.png)
-
+![Sample Hypergraph](202303040026259.png)
 
 为了方便后续介绍 Hypergraph Join Order 算法的过程，我们还需要继续学习几个概念：
 1. 子图（sg）：子图（sg）是由某些 Hypernode 和它们之间的 Hyperedge 构成的图，例如上图中 {{R1}, {R2}} 是一个 Hypernode 子集，它们只有一个 Hyperedge ({R1}, {R2})，形成了一个含 2 个 Hypernode 的子图。
@@ -70,8 +71,7 @@ non-subsumed hyperedge：所有不被其他 hyperedge 所包含的 hyperedge 所
 2. ({R1}, {R2, R3}) 是一个非包含的超边，因为它没有被其他任何超边包含；
 3.  ({R1, R2}, {R3, R4}) 也是一个非包含的超边。
 
-![](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303041353643.png)
-
+![](202303041353643.png)
 non-subsumed hypernode：不被其他 hypernode 包含的 hyper node，比如 hypernode {R1} 和 {R2} 被 {R1, R2} 包含，{R1} 和 {R2} 都是 non-subsumed hypernode，而 {R1, R2} 不是 non-subsumed hypernode。
 
 interesting hypernode：寻找 interesting hypernode 分为两步：

@@ -4,6 +4,10 @@ date: 2023-05-28T00:00:00Z
 categories: ["Paper Reading", "Join Reorder"]
 ---
 
+![](featured.png)
+
+> 本文封面图片来自 [自然摄影师雷雨](https://space.bilibili.com/470226708/)
+
 ## INTRODUCTION
 
 《[Analysis of Two Existing and One New Dynamic Programming Algorithm for the Generation of Optimal Bushy Join Trees without Cross Products](https://www.researchgate.net/profile/Thomas_Neumann2/publication/47861835_Analysis_of_Two_Existing_and_One_New_Dynamic_Programming_Algorithm_for_the_Generation_of_Optimal_Bushy_Join_Trees_without_Cross_Products/links/0912f506d90ad19031000000.pdf)》这篇论文先分析了 DPsize 和 DPsub 这两个常用的 join reorder DP 算法，发现它们在枚举 DP 使用的 csg-cmp-pair 时并不高效，实际时间复杂度远高于理论下界。作者提出了一种高效的 csg-cmp-pair 的枚举算法和 DPccp 算法，使得每个 csg-cmp-pair 仅被枚举一次，在各种类型的 join graph 和 join size 下都能表现出良好的 DP 性能。

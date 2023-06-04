@@ -1,7 +1,7 @@
 ---
 title: "[SIGMOD 2020] Rethinking Logging, Checkpoints, and Recovery for High-Performance Storage Engines"
 date: 2023-04-09T00:00:00Z
-categories: ["Paper Reading"]
+categories: ["Paper Reading", "Logging & Recoverying"]
 draft: false
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "[VLDB 2022] Memory-Optimized Multi-Version Concurrency Control for Disk-Based Database Systems"
 date: 2023-04-07T00:00:00Z
-categories: ["Paper Reading"]
+categories: ["Paper Reading", "MVCC"]
 draft: false
 ---
 

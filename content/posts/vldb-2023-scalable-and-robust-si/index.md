@@ -1,7 +1,7 @@
 ---
 title: "[VLDB 2023] Scalable and Robust Snapshot Isolation for High-Performance Storage Engines"
 date: 2023-05-24T00:00:00Z
-categories: ["Paper Reading"]
+categories: ["Paper Reading", "MVCC"]
 ---
 
 ## 简介
