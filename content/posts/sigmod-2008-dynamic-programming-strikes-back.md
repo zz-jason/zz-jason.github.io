@@ -1,39 +1,49 @@
 ---
 title: "[SIGMOD 2008] Dynamic Programming Strikes Back"
 date: 2023-03-01T08:00:00Z
-categories: ["Paper Reading"]
+categories: ["Paper Reading", "Join Reorder"]
 draft: true
 ---
 
 MySQL 8.0.31 引入了 Hypergraph Join Optimizer，它用超图表示多表 Join，每个边连接任意个表，直接表示复杂的 Join Predicate，避免了无用的 Cross Join。它采用了《Dynamic Programming Strikes Back》中的 DPhyp 方法进行 Join Reorder，能够更好地优化多表 Join 的性能和成本。
 
 
-## 为什么要引入 Hypergraph Join Order 算法
+## INTRODUCTION
 
 DPsize -> DPccp
 memoization -> top-down partition search
 
-DPccp 和 top-down partition search 没被大规模生产使用的原因：
+DPccp 和 top-down partition search 没被大规模生产使用的原因主要是这 2 个：
+1. 它们都没有考虑 hypergraph
+2. 它们都没有考虑 outer join 和 anti join（也包括 semi join）
 
-> First, as has been argued in several places, hypergraphs must be handled by any plan generator [1, 19, 23]. Second, plan generators have to deal with outer joins and antijoins [11, 19].
+虽然已经有一些基于 DPsize 的算法能够考虑 outer join 和 anti join，但时间复杂度都很高。作者提出了 DPhyp，能够处理 hyper graph，能够考虑 left 和 full outer join，anti join，nest join，以及它们各自的 dependent join（处理子查询的 apply 算子）。
 
+non-inner join 可以通过引入 hyperedge 处理掉，这样只需要添加 hyperedge 就可以处理所有的 non-inner join 以及 dependent join 了。
 
-## 什么是 Hypergraph
+## HYPERGRAPHS
+
+先来了解一些关于 hyper graph 的概念
+
+### Definitions
 
 Hypergraph 由 Hypernode 和 Hyperedge 构成：
 1.  Hypernode：它是一个节点集合，里面可以有一个或多个节点。例如，下图中 {R1} 是只有 R1 的 Hypernode，{R1, R2, R3} 是有 R1、R2 和 R3 的 Hypernode。
-2.  Hyperedge：它是一条连接两个 Hypernode 的边。例如，下图中 {R1} 和 {R2} 之间的边是一个 Hyperedge，{R1, R2, R3} 和 {R4, R5, R6} 之间的边也是一个 Hyperedge。
+2.  Hyperedge：它是一条连接两个 Hypernode V 和 U 的边，其中 V∩U=∅。例如，下图中 {R1} 和 {R2} 之间的边是一个 Hyperedge，{R1, R2, R3} 和 {R4, R5, R6} 之间的边也是一个 Hyperedge。
 
-在 Join Order 的上下文里，Node 指的是参与 Join 的表，Edge 指的是 Join Predicate。例如，下图中，R1 ~ R6 是 6 个表，`R1.a + R2.b + R3.c = R4.d + R5.e + R6.f` 是一个复杂的 Join Predicate，它连接了两个 Hypernode：{R1, R2, R3} 和 {R4, R5, R6}。
+在 Join Order 的上下文里，Node 指的是参与 Join 的表，Edge 指的是 Join Predicate。例如，下图中，R1 ~ R6 是 6 个表，R1.a + R2.b + R3.c = R4.d + R5.e + R6.f 是一个复杂的 Join Predicate，它代表了一个 hyperedge，连接了两个 Hypernode：{R1, R2, R3} 和 {R4, R5, R6}。
+
+需要注意的是，上面的 join predicate 可以被优化器改写为 R1.a + R2.b = R4.d + R5.e + R6.f - R3.c，它代表的 hyperedge 连接了 {R1, R2} 和 {R3, R4, R5, R6} 这两个 hypernode，在进行 join reorder 构造 hyper graph 时，所有这些优化器转换后的 join predicate 都需要加入到 hyper graph 中。
 
 ![Sample Hypergraph](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303040026259.png)
 
-把所有要 Join 的表看作节点，把他们之间的 Join Predicate 看作边。那么，Join Order 问题就变成了：怎样选择节点和边，构建一个包含所有表和条件的图，使得图的总权值最小。
 
 为了方便后续介绍 Hypergraph Join Order 算法的过程，我们还需要继续学习几个概念：
 1. 子图（sg）：子图（sg）是由某些 Hypernode 和它们之间的 Hyperedge 构成的图，例如上图中 {{R1}, {R2}} 是一个 Hypernode 子集，它们只有一个 Hyperedge ({R1}, {R2})，形成了一个含 2 个 Hypernode 的子图。
 3. 联通子图（csg）：联通子图是指可以划分成两个联通子图通过 Hyperedge 相连的子图，与普通连通图类似，只是把 Node 和 Edge 换成 Hypernode 和 Hyperedge。例如上图中 {{R4}, {R6}} 就不是一个联通子图，因为 {R4} 和 {R6} 之间没有 Hyperedge。
 4. 联通补图（cmp）：联通补图是指该子图的一个补图，并且这个补图是联通的。以上图 {{R1}, {R2}} 代表的子图为例，{{R4}, {R5}} 代表的子图是它的一个联通补图，但 {{R4}, {R6}} 代表的子图虽然是它的补图，但因为 {{R4}, {R6}} 不联通，所以不是它的联通补图。
+
+### Csg-cmp-pair
 
 联通子图和它的补图们（csg-cmp-pair）：csg-cmp-pair 是一个由 csg 和 cmp 组成的联通子图对，它们之间有一条 Hyperedge 连接，表示可以把两个子查询合并成一个更大的查询。例如，如果我们有四个表 A、B、C、D 和三个条件 A.id = B.id, B.name = C.name, C.age = D.age，那么我们可以把这个查询用一个超图表示：
 
@@ -42,19 +52,8 @@ Hypergraph 由 Hypernode 和 Hyperedge 构成：
 -   ({A,B}, {C,D}) 是一个 csg-cmp-pair，因为 {A,B} 和 {C,D} 都是连接的子图，并且它们之间有一条边 B.name = C.name 连接。
 -   ({B,C}, {A,D}) 是另一个 csg-cmp-pair，因为 {B,C} 和 {A,D} 都是连接的子图，并且它们之间有两条边 A.id = B.id 和 C.age = D.age 连接。
 
-通过找到所有可能的 csg-cmp-pair，我们可以用动态规划的方法来寻找最优的 Join Order。
+通过找到所有可能的 csg-cmp-pair，我们可以用动态规划的方法来寻找最优的 Join Order。和 DPccp 一样，仅枚举满足 min(S1) < min(S2) 的 csg-cmp-pair (S1, S2)，其中 min(S) 表示 S 中的最小节点编号。
 
-
-### 那怎么枚举所有的 csg-cmp pair 呢
-
-论文中使用 E↓ 表示超图中非包含的超边的集合。如果一个超边 A 的所有节点都包含在另一个超边 B 的节点中，那么我们就说 A 被 B 包含或者 B 包含 A。例如下图中有三个超边 ({R1}, {R2}), ({R1}, {R2, R3}), ({R1, R2}, {R3, R4})，那么：
-1.  ({R1}, {R2}) 被 ({R1}, {R2, R3}) 包含；
-2. ({R1}, {R2, R3}) 是一个非包含的超边，因为它没有被其他任何超边包含；
-3.  ({R1, R2}, {R3, R4}) 也是一个非包含的超边。
-
-![](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303041353643.png)
-
-Hypergraph 的算法过程其实很简单：不断扩展子图，更新更大子图的最佳 Join Order。当计算完所有子图时，整个图的最佳 Join Order 也就确定了。在这个过程中需要不断枚举子图和它的补图。
 
 动态规划的核心是最优子结构，在 Hypergraph 中子结构就是 Hypergraph 的子图，在 DPhyp 这个算法中仅考虑 connected subgraph（缩写成 csg）：
 
@@ -64,7 +63,27 @@ Hypergraph 的算法过程其实很简单：不断扩展子图，更新更大子
 
 从图论的视角来看，一个 connected hypergraph 也可以成为一个团，因为每个边代表了一个 join predicate，那么也就意味着这个 connected hypergraph 所对应的 join plan 中可以不使用 cross join（总是存在某个 join predicate 连接两个表集）
 
-## DPhyp
+### Neighborhood
+
+non-subsumed hyperedge：所有不被其他 hyperedge 所包含的 hyperedge 所组成的边集。例如下图中有三个超边 ({R1}, {R2}), ({R1}, {R2, R3}), ({R1, R2}, {R3, R4})，那么：
+1.  ({R1}, {R2}) 被 ({R1}, {R2, R3}) 包含；
+2. ({R1}, {R2, R3}) 是一个非包含的超边，因为它没有被其他任何超边包含；
+3.  ({R1, R2}, {R3, R4}) 也是一个非包含的超边。
+
+![](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303041353643.png)
+
+non-subsumed hypernode：不被其他 hypernode 包含的 hyper node，比如 hypernode {R1} 和 {R2} 被 {R1, R2} 包含，{R1} 和 {R2} 都是 non-subsumed hypernode，而 {R1, R2} 不是 non-subsumed hypernode。
+
+interesting hypernode：寻找 interesting hypernode 分为两步：
+1. 找到所有潜在的 interesting hypernode 集合 E↓′(S, X)，然后最小化 E↓′(S, X)，消除其中被包含的 hypernode，得到最终的 interesting hypernode 集合 E↓(S, X)。
+
+就这些定义，给定一个 hypernode S 和一个 excluded 节点集 X，它的 neighborhood 点集 N(S, X) 为：
+
+![the neighborhood of a hyper- node S](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202306040907888.png)
+对于一开始图 2 中的 hypergraph 来说，当 S 和 X 都为 {R1, R2, R3} 时，N(S, X) 为 {R4}。
+
+
+## THE ALGORITHM
 
 ### 基本思路
 
@@ -89,6 +108,9 @@ EnumerateCsgRec() 负责递归的枚举所有联通子图。
 
 ![EnumerateCsgRec](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303041423506.png)
 
+EnumerateCsgRec 的主要作用通过 csg S1 的 neighborhood 将其扩展成更大的 csg。
+
+
 1. For each of these subsets N, it checks whether S1 ∪ N is a connected component. This is done by a lookup into the dpTable. If this test succeeds, a new connected com- ponent has been found and is further processed by a call EmitCsg(S1 ∪ N ).
 2. Then, in a second step, for all these sub- sets N of the neighborhood, we call EnumerateCsgRec such that S1 ∪ N can be further extended recursively.
 
@@ -100,7 +122,7 @@ Take a look at step 12. This call was generated by Solve on S1 = {R2 }. The neig
 
 ![EmitCsg](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303041424606.png)
 
-It is then responsible to generate the seeds for all S2 such that (S1 , S2 ) becomes a csg-cmp-pair
+EmitCsg 的主要作用是根据 csg S1 的 neighborhood 生成匹配的 csg-cmp-pair。
 
 1. B_min(S1): All nodes that have ordered before the smallest element in S1 (captured by the set B_min(S1)) are removed from the neighborhood to avoid duplicate enumerations.
 2. Since the neighborhood also contains min(v) for hyperedges (u, v) with |v| > 1, it is not guaranteed that S1 is connected to v.
@@ -113,7 +135,7 @@ Take a look at step 20. The current set S1 is S1 = {R1, R2, R3}, and the neighbo
 
 ![EnumerateCmpRec](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303041424141.png)
 
-EnumerateCsgRec has three parameters. The second parameter is a set S2 which is connected and must be extended until a valid csg-cmp-pair is reached.
+EnumerateCmpRec 的主要作用是基于初始的 cmp S2  和它的 neighborhood N(S2, X) 扩展更多的 cmp。
 
 ![EnumerateCmpRec example](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303041554851.jpg)
 
@@ -122,6 +144,8 @@ Take a look at step 21 again. The parameters are S1 = {R1, R2, R3} and S2 = {R4}
 ### Subroutine 5: EmitCsgCmp()
 
 ![EmitCsgCmp](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303041425353.png)
+
+EmitCsgCmp 的主要作用是将 csg-cmp-pair (S1, S2) 的最佳 plan join 起来，计算 S1、S2 的 join predicate 和 join cost，更新 dpTable。
 
 The task of EmitCsgCmp(S1,S2) is to join the optimal plans for S1 and S2, which must form a csg-cmp-pair. For this purpose, we must be able to calculate the proper join predicate and costs of the resulting joins.
 
@@ -161,7 +185,7 @@ The task of EmitCsgCmp(S1,S2) is to join the optimal plans for S1 and S2, which 
 
 ![Results for star-based regular graphs](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202303041622629.png)
 
-## Non-ReOrderable Operators
+## NON-REORDERABLE OPERATORS
 
 ### Considered Binary Operators
 
@@ -170,4 +194,12 @@ The task of EmitCsgCmp(S1,S2) is to join the optimal plans for S1 and S2, which 
 nestjoin 有一种变种称之为 d-join，d-join 可以和看做是 SQL Server 中的 Apply 算子，或者 Hyper 中的 DependentJoin 算子。在子查询优化中通常用来表示关联子查询，对子查询的解关联优化非常有帮助。
 
 ### Reorderability
+
+### Existing Approaches
+
+Rao et al 在《A practical approach to outerjoin and antijoin reordering》中提出了基于 extended eligibility list (EEL) 的方案，能够高效的处理普通 join、left join 和 anti join，但是不能处理 dependent join。另外是它需要在 EmitCsgCmp 中检查，
+
+### Non-Commutative Operators
+
+## TRANSLATION OF JOIN PREDICATES
 

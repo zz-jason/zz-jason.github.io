@@ -1,6 +1,5 @@
 ---
-title: "[VLDB 2022] Excalibur: A Virtual Machine for Adaptive Fine-grained
-JIT-Compiled Query Execution based on VOILA"
+title: "[VLDB 2022] Excalibur: A Virtual Machine for Adaptive Fine-grained JIT-Compiled Query Execution based on VOILA"
 date: 2023-02-19T03:22:58Z
 categories: ["Paper Reading"]
 draft: true

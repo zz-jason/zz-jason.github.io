@@ -1,7 +1,7 @@
 ---
 title: "[VLDB 2006] Analysis of Two Existing and One New Dynamic Programming Algorithm for the Generation of Optimal Bushy Join Trees without Cross Products"
 date: 2023-05-28T00:00:00Z
-categories: ["Paper Reading"]
+categories: ["Paper Reading", "Join Reorder"]
 ---
 
 ## INTRODUCTION
