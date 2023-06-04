@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://zz-jason.github.io/sitemap.xml
