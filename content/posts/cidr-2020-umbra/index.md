@@ -4,6 +4,9 @@ date: 2023-04-01T08:00:00Z
 categories: ["Paper Reading"]
 ---
 
+![](featured.jpg)
+> 本文封面图片来自 [自然摄影师雷雨](https://space.bilibili.com/470226708/)
+
 ## 简介
 
 这篇论文介绍了 TUM 的通用数据库 Umbra，它基于 SSD，能高效处理任意大小的数据集，是内存数据库 HyPer 的继任者。Umbra 的关键实现包括：不定长 page 和专用 buffer manager，pointer swizzling 和 versioned latch 等多核优化，高效的 log 和 recover 算法，代码生成等。
@@ -12,7 +15,7 @@ Umbra 是 LeanStore（基于 SSD 的定长 page 数据库）的演进，两者�
 
 ## Buffer Manager
 
-![Figure 1](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304021024851.png)
+![Figure 1](202304021024851.png)
 
 LeanStore 的 Buffer Manager 管理定长 page，虽然高效，但需要额外处理可变大小的 tuple，增加系统复杂性和性能开销。
 
@@ -34,7 +37,7 @@ Buffer Manager 跟踪物理内存使用情况，保证 buffer pool 不超配置�
 
 ### Pointer Swizzling
 
-![Figure 2: Illustration of a swizzled (top) and unswizzled (bot- tom) swip](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304022007177.png)
+![Figure 2: Illustration of a swizzled (top) and unswizzled (bot- tom) swip](202304022007177.png)
 
 为了把页面序列化到磁盘中，页面不能用内存指针而要用 page ID（PID）来引用。一种常见的方法是用一个全局哈希表来映射 page ID 和内存指针，但这样每次访问页面都要获取 latch 来操作哈希表，会导致 latch contention 的性能问题。
 
@@ -44,7 +47,7 @@ Buffer Manager 跟踪物理内存使用情况，保证 buffer pool 不超配置�
 
 ### Versioned Latches
 
-![Figure 3: Structure of the versioned latch stored in a buffer frame for synchronization of page accesses](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304022008208.png)
+![Figure 3: Structure of the versioned latch stored in a buffer frame for synchronization of page accesses](202304022008208.png)
 
 Umbra 用一个 64 位整数的原子变量实现了 versioned latch，支持 exclusive、shared 和 optimistic 三种上锁模式，以减少 latch contention。versioned latch 的 5 比特位表示锁的状态，0 为无锁，1 为 exclusive 锁，2 及以上为 shared 锁。shared 锁允许多个线程同时读取被保护的数据，exclusive 锁则只允许一个线程读写。versioned latch 的剩余 59 比特位表示版本计数器，每次修改数据时递增。optimistic 模式下，线程不会真正上锁，而是通过比较数据读取前后的版本计数器来判断是否需要重试。
 
@@ -72,7 +75,7 @@ Umbra 采用了变长 page，实现了对应的 buffer manager。其他模块都
 
 ### String Handling
 
-![Figure 4: Structure of the 16-byte string headers in Umbra](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304022100558.png)
+![Figure 4: Structure of the 16-byte string headers in Umbra](202304022100558.png)
 
 因为 page size 是变长的，一个 string 也不需要被拆分成多段了，Umbra 简单的将其存成 length + data 两部分：
 
@@ -101,7 +104,7 @@ select count(*) from supplier group by s_nationkey
 
 对上面这个 TPC-H 查询，HyPer 会采用两个 Pipeline 来执行它，第一个 Pipeline 扫描 supplier 表并执行 group by 操作，第二个 Pipeline 扫描每个 group 的数据并打印查询输出。在 Umbra 中，这些 Pipeline 进一步分解为 step，每个 step 可以是单线程的也可以是多线程的。上述 query 的 pipeline 和 step 如下图所示：：
 
-![Figure 5: Pipelines and the corresponding steps for a simple group-by query in Umbra](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304022118774.png)
+![Figure 5: Pipelines and the corresponding steps for a simple group-by query in Umbra](202304022118774.png)
 
 在生成的代码中，每个 step 对应一个单独的函数，可以由 Umbra 的 runtime system 调用。在查询执行时，通过这些 step 完成 pipeline 内的状态转换，step 的执行由 Umbra 的查询执行器协调。多线程 step 采用 morsel-driven 的方式执行。
 
@@ -116,7 +119,7 @@ Umbra 不会立即将 IR 编译为优化后的机器码。Umbra 采用了自适�
 
 ## Experiments
 
-![Figure 6: Relative speedup of Umbra over HyPer and Mon- etDB on JOB and TPCH](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304022135620.png)
+![Figure 6: Relative speedup of Umbra over HyPer and Mon- etDB on JOB and TPCH](202304022135620.png)
 
 作者测试了 TPC-H 和 JOB 两个 Benchmark 10GB 的数据，每个查询重复五次，选取最快的重复结果（也就是充分预热后的结果）。和 Hyper 相比，Umbra 的性能提升明显，主要来自自适应的 IR 编译。特别是在 JOB 上，Umbra 的 geometric mean 提升为 3.0×，在 TPC-H 上为 1.8×。在这些查询中，HyPer 实际上在查询编译上花费的时间远远超过查询执行时间，最多达到 29×。
 

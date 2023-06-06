@@ -4,6 +4,9 @@ date: 2023-04-03T00:00:00Z
 categories: ["Paper Reading"]
 ---
 
+![](featured.png)
+> 图片来源于 [旅行摄影师唐僧](https://space.bilibili.com/405561962/)
+
 ## Introduction
 
 Buffer Manager 和 B+ Tree 在 In-Memory 的负载上有很多性能瓶颈，比如将 Page ID 转换成内存指针的 Hash Table 和它对应的全局 Latch，比如访问 B+ Tree 的每个内存节点时需要获取的 Latch 等。为了达到更好的性能，像 H-Store、Hekaton、HANA、HyPer、或 Silo 这样的内存数据库都摒弃了 Buffer Manager 的设计，把数据和索引直接存储在内存中，通过内存指针而不是 Page ID 来高效的访问这些数据。
@@ -18,7 +21,7 @@ LeanStore 的基石有 3 个，分别是 Pointer Swizzling、Efficient Page Repl
 
 ### Pointer Swizzling
 
-![Fig. 2 Tree structure](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304050115475.png)
+![Fig. 2 Tree structure](202304050115475.png)
 
 内存中 B+ Tree 的 Page 都由 Buffer Manager 管理，访问 B+ Tree 的内存 Page 需要通过 Page ID 从 Buffer Manager 那获取对应的内存指针。通常 Buffer Manager 使用 Hash Table 来存储 Page ID 到内存指针的映射，方便快速知道一个 Page 在不在内存中以及对应的内存在哪。而为了支持并发安全的 Hash Table 读写操作，这个 Hash Table 上有个全局 Latch，这个 Latch 的锁竞争就是传统 B+ Tree 的性能瓶颈之一。
 
@@ -26,7 +29,7 @@ LeanStore 去除了这个全局 Hash Table 以及对应的 Latch，采用了 Poi
 
 ### Efficient Page Replacement
 
-![Fig 3. The possible states of a page](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304050010698.png)
+![Fig 3. The possible states of a page](202304050010698.png)
 
 一般 Buffer Manager 采用 LRU 或者 Second Chance 的缓存替换策略，这些策略是有额外开销的，比如追踪所有的 Page 访问操作。另外并发对那些热点 Page（比如 B+ Tree 的根节点）更新 LRU 链表、Second Chance 比特位等也存在无法 Scale 的性能瓶颈。
 
@@ -47,7 +50,7 @@ LeanStore 将所有 Unswizzled Page 维护在一个 Cooling Stage 中（占整�
 
 ### Overview
 
-![Fig 4. Overview of LeanStore's data structures](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304032147076.png)
+![Fig 4. Overview of LeanStore's data structures](202304032147076.png)
 
 LeanStore 内部主要分为 3 个组件用于实现 Buffer Manager 需要具备的 3 个功能：
 1. 根据 Page ID 判断对应的数据是否在内存中，返回对应的内存指针：如上图上部分的 Buffer Pool 所示，LeanStore 将每个 Page 的内存指针或 Page ID 包装在 Swip 中，并将 Swip 交给其父亲页面管理，不再依赖中心化的 Hash Table
@@ -64,7 +67,7 @@ LeanStore 不再有全局的 Hash Table 来存储 Page ID 到内存指针的映�
 
 LeanStore 简化了这个问题，所有 Page 都只有一个 Swip 存储在其父节点中，兄弟节点之间不再有 Swip 存在。去除兄弟节点之间的 Swip 后，LeanStore 通过 Fence Keys 实现了 Range Scan，通过 Optimistic Latch Coupling 实现了高性能的并发读写，这个在后面会提到。
 
-![Fig5. Inner pages can only be unswizzled after all their child pages](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304032230116.png)
+![Fig5. Inner pages can only be unswizzled after all their child pages](202304032230116.png)
 
 LeanStore 要求只有所有的子 Page Unswizzle 后才能 Unswizzle 父 Page，在这个约束下，Buffer Manager 必须能够遍历 Page 上的所有 Swip，找到能够 Unswizzle 的孩子节点。如上图所示，为了避免将 Page 内部信息暴露给 Buffer Manager，每个类型的 Page 都实现了一个 Iteration Callback。Buffer Manager 通过这个 Callback 遍历 B+ Tree，随机寻找一个可以 Unswizzle 的 Page。
 
@@ -106,7 +109,7 @@ Optimistic Latch 内部有个版本计数器，每当数据更新发生后就增
 
 ### Epoch-Based Reclamation
 
-![Fig 6. Epoch-based reclamation](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304032337156.png)
+![Fig 6. Epoch-based reclamation](202304032337156.png)
 
 在 Optimistic Latch 机制下，读 Page 不会对获取它的 Latch，而这时候如果有其他线程想要剔除或者删除这个 Page 就会导致内存问题。为了避免这些潜在问题，LeanStore 引入了基于 Epoch 的 Page 回收机制。
 
@@ -152,21 +155,21 @@ LeanStore 采用了一个后台线程异步的将需要淘汰的 Dirty Page 写�
 
 ### TPC-C
 
-![Fig 1. Single-threaded in-memory TPC-C performance (100 warehouses)](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304051420113.png)
+![Fig 1. Single-threaded in-memory TPC-C performance (100 warehouses)](202304051420113.png)
 
 从单线程的测试来看，LeanStore 带 Buffer Manager 的吞吐和内存 B+ Tree 的吞吐差不多，相比 BerkeleyDB 和 WiredTiger 有好几倍的提升。
 
-![Fig 7. Impact of the 3 main LeanStore features](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304051423768.png)
+![Fig 7. Impact of the 3 main LeanStore features](202304051423768.png)
 
 接着按照 Pointer Swizzling、Replacement Strategy 和 Optimistic Latch 的的顺序逐渐开启这些优化，来看他们对性能提升的帮助分别有多大。单线程情况下 Pointer Swizzling 和 Replacement Strategy 对性能提升帮助最大。10 线程的结果是单线程结果的 9 倍，接近线性提升。多线程的结果也能看出来 Pointer Swizzling 和 Replacement Strategy 中去掉的两把全局锁对性能提升的巨大收益。
 
-![Fig 8. Multi-threaded, in-memory TPC-C on 10-core system](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304051433852.png)
+![Fig 8. Multi-threaded, in-memory TPC-C on 10-core system](202304051433852.png)
 
 多线程情况下 LeanStore 相比 WiredTiger、BerkelyDB 的性能差异随着线程增多而增大。LeanStore 的线性扩展能力是最好的。
 
 ### Scalability on Many-Core Systems
 
-![Table 1: LEANSTORE SCALABILITY RUNNING TPC-C ON 60-CORE NUMA SYSTEM](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304051439530.png)
+![Table 1: LEANSTORE SCALABILITY RUNNING TPC-C ON 60-CORE NUMA SYSTEM](202304051439530.png)
 
 接着测试了一个有 60 Core 的 NUMA 系统，它由 4 个 15 Core 的 Intel Xeon E7-4870 v2 (Ivy Bridge, 2.3GHz) CPU 组成，没有 L3 Cache。前后分别做了 3 个优化：
 1. Warehouse Affinity：每个 Worker 线程处理一个 Local Warehouse，是一种针对 TPC-C Workload 的优化，相比 Baseline 性能提升 50.4 倍
@@ -183,7 +186,7 @@ LeanStore 采用了一个后台线程异步的将需要淘汰的 Dirty Page 写�
 
 ### TPC-C
 
-![Fig 9. TPC-C with 20GB buffer pool (100 warehouses, 20 threads)](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304051454113.png)
+![Fig 9. TPC-C with 20GB buffer pool (100 warehouses, 20 threads)](202304051454113.png)
 
 LeanStore、BerkeleyDB、和 WiredTiger 的 Buffer Pool 都设置为 20GB，同时内存 B+ Tree 开启 Swap 也加入对照测试。在 500MB/s 的 IO 情况下 LeanStore 的性能一直很高（不过看起来 TPC-C 性能有些波动）。BerkelyDB 的表现比较有意思，作者说是因为它的性能太差了，10 分钟才能填满 Buffer Pool，所以上面这个 1 分钟的图来看它的表现很平稳。
 
@@ -198,21 +201,21 @@ TPC-C 是一个 Insert Heavy 的测试集，那些大表比如 stock、customer 
 
 使用 Uniform 和 Zipf 分布生成了 5GB 的数据集进行了几组点查测试，使用 1GB 的 Buffer Pool，Cooling Stage 容量设置为 10%，Key 固定 8 字节，value 120 字节，总共 41M 个 Key-Value。
 
-![Fig 10. Lookup performance and number of I/O operations per second](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304051521566.png)
+![Fig 10. Lookup performance and number of I/O operations per second](202304051521566.png)
 
 这里展示了不同数据倾斜情况下，固定 Cooling Stage 为 10% 的吞吐表现。可以看到的是数据倾斜越程度越高，测试过程中的 IO 越少，最终的吞吐也越高，算是符合预期。
 
-![](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304051537270.png)
+![](202304051537270.png)
 
 这里展示了不同 Cooling Stage 大小在不同数据倾斜情况下的吞吐表现。目的是想看什么样的 Cooling Stage 容量是合适的。以 Cooling Stage 为 10% 的性能表现作为基准（图中的灰色横线）。一些图细看还是比较有意思。综合来看 10% 是个比较不错的 Cooling Stage 配置。
 
-![Page hit rates](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304051603916.png)
+![Page hit rates](202304051603916.png)
 
 作者也比较了 1GB Buffer Pool，5GB  数据量，Zipf Factor =1.0 的情况下不同缓存替换算法的 Page 命中率，虽然比 LRU 和 2Q 在小数点后面有所下降，但考虑到维护负担后 LeanStore 的 Replacement Strategy 会有更好的性能。
 
 ### Scans
 
-![Fig 12. Concurrent scan of the 0.7GB order table and the 10GB orderline table](https://raw.githubusercontent.com/zz-jason/blog-images/master/images/202304051633612.png)
+![Fig 12. Concurrent scan of the 0.7GB order table and the 10GB orderline table](202304051633612.png)
 
 作者最后测试了 Full Table Scan 的性能。使用 TPC-C 400 warehouse 的数据，order 表 0.7GB，orderline 表 10GB。Buffer Pool 从 2GB 测试到 12GB 得到了上面的图。两个表各用一个线程分别在不停的 Scan。
 
