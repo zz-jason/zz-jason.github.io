@@ -1,5 +1,5 @@
 ---
-title: "[MySQL] How TPC-H Q4 is optimized in MySQL"
+title: "[MySQL] 通过 Optimizer Trace 理解查询优化"
 date: 2023-03-31T00:00:00Z
 categories: ["MySQL"]
 draft: true
