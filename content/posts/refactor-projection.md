@@ -1,7 +1,7 @@
 ---
 title: "重构 Projection Elimination"
 date: 2017-08-12T11:03:22+08:00
-categories: ["Technology"]
+categories: ["TiDB", "Query Execution"]
 ---
 
 在 TiDB rc4 版本以前，Projection Elimination 是在 Physical Optimization 阶段完成以后做的。老的 Projection Elimination 只能消除那种做纯拷贝，不交换列的顺序，只改变列的名字的 Projection，Projection 消除后，他的 child 直接使用这个被消除后的 Projection 的 Schema。

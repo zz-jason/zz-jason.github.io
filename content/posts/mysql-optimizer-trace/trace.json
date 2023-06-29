@@ -1,0 +1,558 @@
+{
+  "steps": [
+    {
+      "join_preparation": {
+        "select#": 1,
+        "steps": [
+          {
+            "join_preparation": {
+              "select#": 2,
+              "steps": [
+                {
+                  "expanded_query": "/* select#2 */ select 1 from `LINEITEM` where ((`LINEITEM`.`L_ORDERKEY` = `ORDERS`.`O_ORDERKEY`) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`))"
+                }
+              ]
+            }
+          },
+          {
+            "expanded_query": "/* select#1 */ select `ORDERS`.`O_ORDERPRIORITY` AS `O_ORDERPRIORITY`,count(0) AS `ORDER_COUNT` from `ORDERS` where ((`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < (DATE'1993-12-01' + interval '3' month)) and exists(/* select#2 */ select 1 from `LINEITEM` where ((`LINEITEM`.`L_ORDERKEY` = `ORDERS`.`O_ORDERKEY`) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`)))) group by `ORDERS`.`O_ORDERPRIORITY` order by `ORDERS`.`O_ORDERPRIORITY`"
+          },
+          {
+            "transformation": {
+              "select#": 2,
+              "from": "IN (SELECT)",
+              "to": "semijoin",
+              "chosen": true,
+              "transformation_to_semi_join": {
+                "subquery_predicate": "exists(/* select#2 */ select 1 from `LINEITEM` where ((`LINEITEM`.`L_ORDERKEY` = `ORDERS`.`O_ORDERKEY`) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`)))",
+                "embedded in": "WHERE",
+                "evaluating_constant_semijoin_conditions": [],
+                "semi-join condition": "((`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`) and (`ORDERS`.`O_ORDERKEY` = `LINEITEM`.`L_ORDERKEY`))",
+                "decorrelated_predicates": [
+                  {
+                    "outer": "`ORDERS`.`O_ORDERKEY`",
+                    "inner": "`LINEITEM`.`L_ORDERKEY`"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "transformations_to_nested_joins": {
+              "transformations": [
+                "semijoin"
+              ],
+              "expanded_query": "/* select#1 */ select `ORDERS`.`O_ORDERPRIORITY` AS `O_ORDERPRIORITY`,count(0) AS `ORDER_COUNT` from `ORDERS` semi join (`LINEITEM`) where ((`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < (DATE'1993-12-01' + interval '3' month)) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`) and (`ORDERS`.`O_ORDERKEY` = `LINEITEM`.`L_ORDERKEY`)) group by `ORDERS`.`O_ORDERPRIORITY` order by `ORDERS`.`O_ORDERPRIORITY`"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "join_optimization": {
+        "select#": 1,
+        "steps": [
+          {
+            "condition_processing": {
+              "condition": "WHERE",
+              "original_condition": "((`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < (DATE'1993-12-01' + interval '3' month)) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`) and (`ORDERS`.`O_ORDERKEY` = `LINEITEM`.`L_ORDERKEY`))",
+              "steps": [
+                {
+                  "transformation": "equality_propagation",
+                  "resulting_condition": "((`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < (DATE'1993-12-01' + interval '3' month)) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`) and multiple equal(`ORDERS`.`O_ORDERKEY`, `LINEITEM`.`L_ORDERKEY`))"
+                },
+                {
+                  "transformation": "constant_propagation",
+                  "resulting_condition": "((`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < (DATE'1993-12-01' + interval '3' month)) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`) and multiple equal(`ORDERS`.`O_ORDERKEY`, `LINEITEM`.`L_ORDERKEY`))"
+                },
+                {
+                  "transformation": "trivial_condition_removal",
+                  "resulting_condition": "((`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < (DATE'1993-12-01' + interval '3' month)) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`) and multiple equal(`ORDERS`.`O_ORDERKEY`, `LINEITEM`.`L_ORDERKEY`))"
+                }
+              ]
+            }
+          },
+          {
+            "substitute_generated_columns": {}
+          },
+          {
+            "table_dependencies": [
+              {
+                "table": "`ORDERS`",
+                "row_may_be_null": false,
+                "map_bit": 0,
+                "depends_on_map_bits": []
+              },
+              {
+                "table": "`LINEITEM`",
+                "row_may_be_null": false,
+                "map_bit": 1,
+                "depends_on_map_bits": []
+              }
+            ]
+          },
+          {
+            "ref_optimizer_key_uses": [
+              {
+                "table": "`ORDERS`",
+                "field": "O_ORDERKEY",
+                "equals": "`LINEITEM`.`L_ORDERKEY`",
+                "null_rejecting": true
+              },
+              {
+                "table": "`LINEITEM`",
+                "field": "L_ORDERKEY",
+                "equals": "`ORDERS`.`O_ORDERKEY`",
+                "null_rejecting": true
+              }
+            ]
+          },
+          {
+            "pulled_out_semijoin_tables": []
+          },
+          {
+            "rows_estimation": [
+              {
+                "table": "`ORDERS`",
+                "table_scan": {
+                  "rows": 1493082,
+                  "cost": 8974.56
+                }
+              },
+              {
+                "table": "`LINEITEM`",
+                "table_scan": {
+                  "rows": 3357001,
+                  "cost": 28740.1
+                }
+              }
+            ]
+          },
+          {
+            "execution_plan_for_potential_materialization": {
+              "steps": [
+                {
+                  "considered_execution_plans": [
+                    {
+                      "plan_prefix": [],
+                      "table": "`LINEITEM`",
+                      "best_access_path": {
+                        "considered_access_paths": [
+                          {
+                            "access_type": "ref",
+                            "index": "PRIMARY",
+                            "usable": false,
+                            "chosen": false
+                          },
+                          {
+                            "rows_to_scan": 3357001,
+                            "filtering_effect": [],
+                            "final_filtering_effect": 0.3333,
+                            "access_type": "scan",
+                            "resulting_rows": 1.11889e+06,
+                            "cost": 364440,
+                            "chosen": true
+                          }
+                        ]
+                      },
+                      "condition_filtering_pct": 100,
+                      "rows_for_plan": 1.11889e+06,
+                      "cost_for_plan": 364440,
+                      "sort_cost": 1.11889e+06,
+                      "new_cost_for_plan": 1.48333e+06,
+                      "chosen": true
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "considered_execution_plans": [
+              {
+                "plan_prefix": [],
+                "table": "`ORDERS`",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "ref",
+                      "index": "PRIMARY",
+                      "usable": false,
+                      "chosen": false
+                    },
+                    {
+                      "rows_to_scan": 1493082,
+                      "filtering_effect": [],
+                      "final_filtering_effect": 0.111089,
+                      "access_type": "scan",
+                      "resulting_rows": 165865,
+                      "cost": 158283,
+                      "chosen": true,
+                      "use_tmp_table": true
+                    }
+                  ]
+                },
+                "condition_filtering_pct": 100,
+                "rows_for_plan": 165865,
+                "cost_for_plan": 158283,
+                "semijoin_strategy_choice": [],
+                "rest_of_plan": [
+                  {
+                    "plan_prefix": [
+                      "`ORDERS`"
+                    ],
+                    "table": "`LINEITEM`",
+                    "best_access_path": {
+                      "considered_access_paths": [
+                        {
+                          "access_type": "ref",
+                          "index": "PRIMARY",
+                          "rows": 4.30958,
+                          "cost": 237737,
+                          "chosen": true
+                        },
+                        {
+                          "rows_to_scan": 3357001,
+                          "filtering_effect": [],
+                          "final_filtering_effect": 0.3333,
+                          "access_type": "scan",
+                          "using_join_cache": true,
+                          "buffers_needed": 14,
+                          "resulting_rows": 1.11889e+06,
+                          "cost": 1.85622e+10,
+                          "chosen": false
+                        }
+                      ]
+                    },
+                    "condition_filtering_pct": 33.33,
+                    "rows_for_plan": 238246,
+                    "cost_for_plan": 396020,
+                    "semijoin_strategy_choice": [
+                      {
+                        "strategy": "FirstMatch",
+                        "recalculate_access_paths_and_cost": {
+                          "tables": []
+                        },
+                        "cost": 396020,
+                        "rows": 165865,
+                        "chosen": true
+                      },
+                      {
+                        "strategy": "MaterializeLookup",
+                        "cost": 651199,
+                        "rows": 165865,
+                        "duplicate_tables_left": false,
+                        "chosen": false
+                      },
+                      {
+                        "strategy": "DuplicatesWeedout",
+                        "cost": 436432,
+                        "rows": 165865,
+                        "duplicate_tables_left": false,
+                        "chosen": false
+                      }
+                    ],
+                    "sort_cost": 165865,
+                    "new_cost_for_plan": 561884,
+                    "chosen": true
+                  }
+                ]
+              },
+              {
+                "plan_prefix": [],
+                "table": "`LINEITEM`",
+                "best_access_path": {
+                  "considered_access_paths": [
+                    {
+                      "access_type": "ref",
+                      "index": "PRIMARY",
+                      "usable": false,
+                      "chosen": false
+                    },
+                    {
+                      "rows_to_scan": 3357001,
+                      "filtering_effect": [],
+                      "final_filtering_effect": 0.3333,
+                      "access_type": "scan",
+                      "resulting_rows": 1.11889e+06,
+                      "cost": 364440,
+                      "chosen": true
+                    }
+                  ]
+                },
+                "condition_filtering_pct": 100,
+                "rows_for_plan": 1.11889e+06,
+                "cost_for_plan": 364440,
+                "semijoin_strategy_choice": [
+                  {
+                    "strategy": "MaterializeScan",
+                    "choice": "deferred"
+                  }
+                ],
+                "rest_of_plan": [
+                  {
+                    "plan_prefix": [
+                      "`LINEITEM`"
+                    ],
+                    "table": "`ORDERS`",
+                    "best_access_path": {
+                      "considered_access_paths": [
+                        {
+                          "access_type": "eq_ref",
+                          "index": "PRIMARY",
+                          "rows": 1,
+                          "cost": 1.01014e+06,
+                          "chosen": true,
+                          "cause": "clustered_pk_chosen_by_heuristics"
+                        },
+                        {
+                          "rows_to_scan": 1493082,
+                          "filtering_effect": [],
+                          "final_filtering_effect": 0.111089,
+                          "access_type": "scan",
+                          "using_join_cache": true,
+                          "buffers_needed": 43,
+                          "resulting_rows": 165865,
+                          "cost": 1.85646e+10,
+                          "chosen": false
+                        }
+                      ]
+                    },
+                    "condition_filtering_pct": 11.1089,
+                    "rows_for_plan": 124296,
+                    "cost_for_plan": 1.37458e+06,
+                    "semijoin_strategy_choice": [
+                      {
+                        "strategy": "LooseScan",
+                        "recalculate_access_paths_and_cost": {
+                          "tables": [
+                            {
+                              "table": "`LINEITEM`",
+                              "best_access_path": {
+                                "considered_access_paths": [
+                                  {
+                                    "access_type": "ref",
+                                    "index": "PRIMARY",
+                                    "usable": false,
+                                    "chosen": false
+                                  },
+                                  {
+                                    "rows_to_scan": 3357001,
+                                    "filtering_effect": [],
+                                    "final_filtering_effect": 0.3333,
+                                    "access_type": "scan",
+                                    "resulting_rows": 1.11889e+06,
+                                    "cost": 364440,
+                                    "chosen": true
+                                  }
+                                ]
+                              },
+                              "unknown_key_1": {
+                                "searching_loose_scan_index": {
+                                  "indexes": [
+                                    {
+                                      "index": "PRIMARY",
+                                      "ref_possible": false,
+                                      "covering_scan_possible": false
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "chosen": false
+                      },
+                      {
+                        "strategy": "MaterializeScan",
+                        "recalculate_access_paths_and_cost": {
+                          "tables": [
+                            {
+                              "table": "`ORDERS`",
+                              "best_access_path": {
+                                "considered_access_paths": [
+                                  {
+                                    "access_type": "eq_ref",
+                                    "index": "PRIMARY",
+                                    "rows": 1,
+                                    "cost": 1.01014e+06,
+                                    "chosen": true,
+                                    "cause": "clustered_pk_chosen_by_heuristics"
+                                  },
+                                  {
+                                    "rows_to_scan": 1493082,
+                                    "filtering_effect": [],
+                                    "final_filtering_effect": 0.111089,
+                                    "access_type": "scan",
+                                    "using_join_cache": true,
+                                    "buffers_needed": 43,
+                                    "resulting_rows": 165865,
+                                    "cost": 1.85646e+10,
+                                    "chosen": false
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        "cost": 1.59836e+06,
+                        "rows": 0.111089,
+                        "duplicate_tables_left": true,
+                        "chosen": true
+                      },
+                      {
+                        "strategy": "DuplicatesWeedout",
+                        "cost": 1.39944e+06,
+                        "rows": 124296,
+                        "duplicate_tables_left": false,
+                        "chosen": true
+                      }
+                    ],
+                    "pruned_by_cost": true
+                  }
+                ]
+              },
+              {
+                "final_semijoin_strategy": "FirstMatch",
+                "recalculate_access_paths_and_cost": {
+                  "tables": []
+                }
+              }
+            ]
+          },
+          {
+            "attaching_conditions_to_tables": {
+              "original_condition": "((`LINEITEM`.`L_ORDERKEY` = `ORDERS`.`O_ORDERKEY`) and (`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < (DATE'1993-12-01' + interval '3' month)) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`))",
+              "attached_conditions_computation": [],
+              "attached_conditions_summary": [
+                {
+                  "table": "`ORDERS`",
+                  "attached": "((`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < (DATE'1993-12-01' + interval '3' month)))"
+                },
+                {
+                  "table": "`LINEITEM`",
+                  "attached": "((`LINEITEM`.`L_ORDERKEY` = `ORDERS`.`O_ORDERKEY`) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`))"
+                }
+              ]
+            }
+          },
+          {
+            "optimizing_distinct_group_by_order_by": {
+              "simplifying_order_by": {
+                "original_clause": "`ORDERS`.`O_ORDERPRIORITY`",
+                "items": [
+                  {
+                    "item": "`ORDERS`.`O_ORDERPRIORITY`"
+                  }
+                ],
+                "resulting_clause_is_simple": true,
+                "resulting_clause": "`ORDERS`.`O_ORDERPRIORITY`"
+              },
+              "simplifying_group_by": {
+                "original_clause": "`ORDERS`.`O_ORDERPRIORITY`",
+                "items": [
+                  {
+                    "item": "`ORDERS`.`O_ORDERPRIORITY`"
+                  }
+                ],
+                "resulting_clause_is_simple": true,
+                "resulting_clause": "`ORDERS`.`O_ORDERPRIORITY`"
+              },
+              "removed_order_by": true
+            }
+          },
+          {
+            "finalizing_table_conditions": [
+              {
+                "table": "`ORDERS`",
+                "original_table_condition": "((`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < (DATE'1993-12-01' + interval '3' month)))",
+                "final_table_condition   ": "((`ORDERS`.`O_ORDERDATE` >= DATE'1993-12-01') and (`ORDERS`.`O_ORDERDATE` < <cache>((DATE'1993-12-01' + interval '3' month))))"
+              },
+              {
+                "table": "`LINEITEM`",
+                "original_table_condition": "((`LINEITEM`.`L_ORDERKEY` = `ORDERS`.`O_ORDERKEY`) and (`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`))",
+                "final_table_condition   ": "(`LINEITEM`.`L_COMMITDATE` < `LINEITEM`.`L_RECEIPTDATE`)"
+              }
+            ]
+          },
+          {
+            "refine_plan": [
+              {
+                "table": "`ORDERS`"
+              },
+              {
+                "table": "`LINEITEM`"
+              }
+            ]
+          },
+          {
+            "considering_tmp_tables": [
+              {
+                "adding_tmp_table_in_plan_at_position": 2,
+                "write_method": "continuously_update_group_row"
+              },
+              {
+                "adding_sort_to_table": ""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "join_execution": {
+        "select#": 1,
+        "steps": [
+          {
+            "temp_table_aggregate": {
+              "select#": 1,
+              "steps": [
+                {
+                  "creating_tmp_table": {
+                    "tmp_table_info": {
+                      "table": "<temporary>",
+                      "in_plan_at_position": 2,
+                      "columns": 2,
+                      "row_length": 24,
+                      "key_length": 15,
+                      "unique_constraint": false,
+                      "makes_grouped_rows": true,
+                      "cannot_insert_duplicates": false,
+                      "location": "TempTable"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "sorting_table": "<temporary>",
+            "filesort_information": [
+              {
+                "direction": "asc",
+                "expression": "`ORDERS`.`O_ORDERPRIORITY`"
+              }
+            ],
+            "filesort_priority_queue_optimization": {
+              "usable": false,
+              "cause": "not applicable (no LIMIT)"
+            },
+            "filesort_execution": [],
+            "filesort_summary": {
+              "memory_available": 262144,
+              "key_size": 15,
+              "row_size": 43,
+              "max_rows_per_buffer": 5140,
+              "num_rows_estimate": 18446744073709551615,
+              "num_rows_found": 0,
+              "num_initial_chunks_spilled_to_disk": 0,
+              "peak_memory_used": 0,
+              "sort_algorithm": "none",
+              "sort_mode": "<fixed_sort_key, packed_additional_fields>"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

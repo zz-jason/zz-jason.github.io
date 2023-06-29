@@ -1,7 +1,7 @@
 ---
 title: "重构 EXPLAIN"
 date: 2017-08-13T11:06:51+08:00
-categories: ["Technology"]
+categories: ["TiDB", "Query Optimization"]
 ---
 
 explain 的用途非常广泛，比如用来查看某个表的信息，查看执行计划等等。explain 的语法可以参考 mysql 文档：[EXPLAIN Syntax](https://dev.mysql.com/doc/refman/5.7/en/explain.html)，另外 EXPLAIN, DESCRIBE, DESC 这几个关键字是等效的，所以很多时候我会直接使用 desc 而不是 explain

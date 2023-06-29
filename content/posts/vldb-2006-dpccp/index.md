@@ -20,7 +20,7 @@ Guido Moerkotte 和 Thomas Neumann 后面基于 DPccp 和 hyper graph 提出了�
 
 ### DPsize: Size-Driven Enumeration
 
-在著名的《[Access Path Selection in a Relational Database Management System](https://courses.cs.duke.edu/compsci516/cps216/spring03/papers/selinger-etal-1979.pdf)》这篇论文中，Selinger 提出了一种 bottom-up 的 join reorder DP 算法，它按照 join 节点数从小到大的顺序为每个 interesting order 计算出了最佳的左深树 join order。虽然 Selinger 的 join reorder 算法只考虑了左深树，但在这个算法思路的基础上可以扩展出能够枚举 bushy tree 的 DPsize 算法，伪代码如下所示：
+在著名的《[Access Path Selection in a Relational Database Management System](https://courses.cs.duke.edu/compsci516/cps216/spring03/papers/selinger-etal-1979.pdf)》一文中，Selinger 提出了一种自下而上的 join reorder DP 算法。该算法按照连接节点数量从小到大的顺序为每个 interesting order 计算出了最佳的左深树 join order。虽然 Selinger 的 join reorder 算法只考虑了左深树，但是可以在这个算法思路的基础上扩展出能够枚举 bushy tree 的 DPsize 算法，其伪代码如下所示：
 
 ![](202305261913463.png)
 
