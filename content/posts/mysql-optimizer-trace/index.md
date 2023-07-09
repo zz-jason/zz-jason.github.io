@@ -1,6 +1,6 @@
 ---
 title: "[MySQL 8.0] 通过 Optimizer Trace 概览查询优化"
-date: 2023-06-07T00:00:00Z
+date: 2023-07-01T00:00:00Z
 categories: ["MySQL", "Query Optimization"]
 ---
 
@@ -8,7 +8,7 @@ categories: ["MySQL", "Query Optimization"]
 
 ## 简介
 
-MySQL 查询优化是一个非常复杂的过程，幸运的是，它支持了 optimizer trace 功能，使我们能够快速概览 MySQL 的查询优化过程。本文将以 TPC-H Q4 为例，通过 optimizer trace 功能，对 MySQL 8.0.31 查询优化的先后步骤和代码路径进行总结，以便更深入地了解 MySQL 查询优化的细节。
+MySQL 查询优化是一个非常复杂的过程，本文以 TPC-H Q4 为例，通过 optimizer trace 尽量系统性的总结 MySQL 8.0.31 查询优化过程，方便将来了解 MySQL 查询优化细节能够按图索骥。
 
 ## TPC-H Q4 及其执行计划
 
@@ -43,10 +43,9 @@ ORDER BY O_ORDERPRIORITY;
                     -> Index lookup on LINEITEM using PRIMARY (L_ORDERKEY=ORDERS.O_ORDERKEY)  (cost=1.32 rows=4)
 ```
 
-关于上面的执行计划我们重点关注这些问题：
+关于上面的执行计划我们重点关注 2 个问题：
 1. MySQL 是在查询优化的哪个步骤将 exists 子查询改写成 semi join 的？
 2. MySQL 代价估算是在什么时候完成的？
-3. MySQL 的表中有哪些统计信息，如何获取？
 
 ## Optimizer Trace 用法和原理
 
