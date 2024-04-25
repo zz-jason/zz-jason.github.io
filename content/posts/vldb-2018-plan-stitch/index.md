@@ -44,8 +44,12 @@ draft: true
 
 值得注意的是，即使没有 plan regression，也可以在日常使用 plan stitch 基于历史生成更优的执行计划。考虑到 plan stitch 过程本身开销很低，plan stitch 完全可以默认开启，作为优化器的一个辅助机制。
 
+对于参数化的 sql 或者 prepare 语句，plan stitch 和 RBPC 一样存储和使用所有 plan 的 avg execution cost。也可以根据需要采用带权重的 cost 计算方式。
+
 ![](20240422232225.png)
-Plan Stitch 整体架构如上图所示，
+Plan Stitch 整体架构如上图所示，plan stitch 作为 sql server 优化器的一个扩展组件，使用 sql server 已有的 query store 功能存储历史 plan、获取算子级别的 execution cost 等信息，通过 plan guide、USE PLAN hint 等功能 force 优化器采用 stitched plan。
+
+从测试结果来看 plan stitch 在广度上能比 RBPC 优化更多的 query，在深度上能大幅减少 query 的 execution cost：经过 RBPC 优化后的查询中，83% 都能经过 plan stitch 进一步优化，减少至少 10% 的 execution cost，甚至有些 query 能减少 2 个数量级的 execution cost。同时，plan stitch 能使用 invalid plan 的 subplan，能优化的 plan 是 RBPC 的 20 倍。
 
 ## Plan Stitch 搜索空间
 
