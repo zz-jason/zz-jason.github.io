@@ -1,65 +1,99 @@
 ---
 title: "[VLDB 2018] Plan Stitch: Harnessing the Best of Many Plans"
 date: 2024-04-22T00:00:00Z
-categories: ["Paper Reading", "Query Optimization"]
-draft: true
+categories:
+  - Paper Reading
+  - Query Optimization
 ---
-
+![featured.jpg](featured.jpg)
+> ACT Day 2
 ## 简介
 
-这篇论文提出了 Plan Stitch，核心思想是把过去执行过的 best plan 和对应的 subplan 当做搜索空间，把过去执行的平均 cpu 时间作为 runtime cost，用 system R 类似的方式在这个搜索空间和 cost model 上缝合出（stitch）一个新的更优的 plan。
+通常商用数据库都有 reversion-based plan correction（RBPC）机制来避免 plan regression，比如 SQL Server APC、Oracle SPM 等：从执行过的 plan 中挑出 execution cost 最低的，强制优化器使用该 plan 以避免 regression。
 
-因为每个 best plan 和其 subplan 都是过去执行过的，这个缝合出的 best plan 发生 regression 的风险非常低，而且它的搜索空间局限在过往执行过的 best plan 和 subplan 上，整体优化时间也非常可控，可以直接用来增强优化器的 SQL Plan Management：在 schema change 之后，仍然可以使用过往的 best plan 得出在新的 schema 上 work 的低风险、高效的新执行计划。
+论文中提出的 Plan Stitch 可以看做是 RBPC 的增强：将搜索空间限制在历史上执行过的 physical plan 上，利用算子级的 execution cost 和类似 System R 的搜索方法，“缝合”出 execution cost 最低的 stitched plan。
 
-利用 subplan 和 runtime cost 指导 query optimization 的 idea 应该也能进一步扩展，整体来看挺实用的。这篇文章着重介绍 Plan Stitch 的核心原理，推荐感兴趣的朋友阅读原论文。
+相比 RBPC，即使某个历史 plan 因为某个表发生了 schema change 导致整体不可用，但只要它的某个 subplan 是有效的，这样的 subplan 也可以被 plan stitch 利用上。
 
-作者在 SQL Server 实现了 Plan Stitch，对 TPC-DS 和三个真实工作负载进行了测试验证。实验结果显示 Plan Stitch 获得的执行计划可以显著降低执行成本，甚至比回滚到先前执行计划的成本更低两个数量级。
+相比基于 query feedback 的查询优化，plan stitch 将搜索空间限制在历史执行过的 physical plan 上，不会产生新的、未执行过的 subplan，这个特点使它比 feedback 更适合那些对 plan 稳定性要求高的场景。
+
+plan stitch 开销很低，即使没有 plan regression 也可以在日常使用 plan stitch 辅助优化器基于历史生成更优的执行计划。
+
+作者在 SQL Server 上利用 TPC-DS 和三个真实负载对 Plan Stitch 进行了充分的测试验证，从测试结果来看 plan stitch 在广度上能比 RBPC 优化更多的 query，在深度上能大幅减少 query 的 execution cost。经过 RBPC 优化后的查询中，83% 都能经过 plan stitch 进一步优化，减少至少 10% 的 execution cost，甚至有些 query 能减少 2 个数量级的 execution cost。
 
 ## 问题描述
 
-通常来说，我们希望优化器能够利用当前的索引和统计信息，稳定的生成高效执行计划。但因为这样那样的原因，有时候同一个 SQL 生成的执行计划可能比之前更差，也就是发生了 Plan Regression。
+通常来说，我们希望优化器能够利用当前的索引和统计信息，稳定的生成高效的执行计划。但因为各种原因，有时同一个 SQL 生成的执行计划可能比之前更差，也就是发生了 plan regression。
 
-这个问题在 SQL Server 中可以通过 Automatic Plan Correction (APC) 来解决，其他数据库也有类似 SQL Server APC 的解决方案，比如 Oracle 的 SQL Plan Management (SPM)。APC 的主要思路是统计该 SQL 的历史执行计划和执行时间，然后采用历史上执行效率最高的 Plan：
+这个问题在 SQL Server 中可以通过 Automatic Plan Correction (APC) 来解决，其他数据库也有类似的机制，比如 Oracle 的 SQL Plan Management (SPM)。APC 是一种保守的机制，主要思路是统计 SQL 的历史执行计划和执行时间，强制优化器采用历史上执行效率最高的 plan，避免新 plan 带来的 regression 风险。
 
-> Once a plan completes execution and has statisticall-significant worse execution cost compared to earlier plans of the same query observed in recent history, the server automatically forces the optimizer to execute the query with the cheaper older plan which is still valid.
-
-类似 APC 这样的 reversion-based plan correction（RBPC）风险低，大部分情况下也非常有效，在生产环境上非常受欢迎。但它也有一定的缺陷：只能在所有执行过的 plan 中选择代价最优的。因为这些 plan 都被执行过，那我们就拥有每个 plan 在算子级别的 execution cost，我们有机会根据所有这些 plan 的 subplan 和它们的 execution cost 组合出新的代价更优的 plan，同时因为这些 subplan 都被执行过，组合出的新 plan 和过往的老 plan 一样 regression 风险都很低。
-
-这个缺陷总结来说就是 RBPC 以 plan 粒度的修正方式限制了发现更优 plan 的可能性。如果能以 subplan 为粒度，综合所有执行过的 plan 的 subplan 和它们的 execution cost statistics，我们有机会设计出比传统 RBPC 更好的 plan correction algorithm。
-
-## Plan Stitch 核心思路
+APC 这样的 reversion-based plan correction（RBPC）机制风险低，大部分情况下非常有效，但也有一定的缺陷：以 plan 粒度的修正方式限制了发现更优 plan 的可能性。
 
 ![](20240422231138.png)
-以上图 A、B、C、D 四表 join 为例。一开始它的执行计划 p1 如图 a，所有的 join 全部是 hash join，后来用户为表 B 和 D 创建了能被 nested loop join 使用的索引，优化器产生了新的执行计划 p2 如图 b。在 p2 中因为估算误差的原因优化器认为 HashJoin(HashJoin(A, B), C) 比 NLJ(NLJ(C, B), A) 的代价更大，于是得到了 p2 的执行计划。但实际执行后发现 p2 出现了性能回退，实际上 HashJoin(HashJoin(A, B), C) 的执行代价（80）比 NLJ(NLJ(C, B), A) 的执行代价（300）更低。按照传统 RBPC（比如 SQL Server APC）的策略此时该查询的 plan 应该回退到 p1。
 
-但从 p2 的 execution cost 可以看到，对 D 表执行 NLJ 的 execution cost (50+150) 比 Hash Join 的 execution cost (100+300) 更低。如果能像 p1 那样对 A、B、C 采用 HashJoin(HashJoin(A, B), C)，像 p2 那样最后采用 NLJ((A, B, C), D)，那么就能得到一个比 p1 更优的新 plan，也就是图 c 所示的 p3。
+以上图 A、B、C、D 四表 join 为例。它的历史执行计划 p1 如图 a，全部采用 hash join，后来用户为表 B 和 D 创建了能被 nested loop join 使用的索引，优化器产生了新的执行计划 p2 如图 b。执行后发现 p2 出现了性能回退，实际上 p1 的 execution cost 比 p2 更低。按照 RBPC 的策略该查询的 plan 回退到了 p1。
 
-上面这个例子展示了 plan stitch 的 idea 和目标：根据过往执行的 plan 和 execution cost 信息，得到 execution cost 最优的 plan。这个 plan 可能是某个历史上执行最优的 plan，也可能是某些执行过的 plan 的 subplan 的组合。
+但从 p2 的 execution cost statistics 可以看出，对 D 表执行 index seek + nested loop join 的 execution cost 比 p1 的 scan + hash join 更低。如果像 p1 那样对 A、B、C 采用 hash join，像 p2 那样对 D 表采用 nested loop join，就能得到一个比 p1 更优的 plan，也就是图 c 所示的 p3。
 
-那怎么实现 plan stitch 呢？使用经典优化器的动态规划方法即可：对于某个 logical expression，只从历史执行计划中选择被执行过且仍旧有效的 physical expression，并使用他们的 execution cost 进行代价估算。这样递归下去即可得到最优的 stitched plan。
+这就是 plan stitch 的目标：根据历史上执行过的 physical plan 和算子级的 execution cost 信息，缝合出 execution cost 最低的 stitched plan。和 APC 一样，Plan Stitch 也是一种保守的机制，仅在历史上执行过的 physical plan 所限制的搜索空间中根据 execution cost 组合最优 plan，发生 regression 的风险很低。
 
-相比 RBPC（比如 SQL Server APC 或 Oracle SPM），plan stitch 有着相似的优点，同时也能尽可能利用历史执行计划。计算过程本身开销都很低、得到的 plan 在之前执行过程中已经被验证过是比较高效的，性能回退的风险很低。相比 RBPC 来说，即使某个 plan 因为 schema change 的原因整体不可用了，但只要它的某个 subplan 仍然可用，这样的 subplan 也可以被 plan stitch 利用上，能够最大限度的利用历史执行计划。
+## Plan Stitch 整体架构
 
-相比基于 query feedback 的查询优化来说，plan stitch 将搜索空间限制在过去执行过的物理执行计划上，不会像基于 query feedback 的查询优化那样产生新的、未执行过的 subplan。plan stitch 的这个特点使它比 feedback 机制更适合那些对 plan 稳定性要求高的场景中。
-
-值得注意的是，即使没有 plan regression，也可以在日常使用 plan stitch 基于历史生成更优的执行计划。考虑到 plan stitch 过程本身开销很低，plan stitch 完全可以默认开启，作为优化器的一个辅助机制。
-
-对于参数化的 sql 或者 prepare 语句，plan stitch 和 RBPC 一样存储和使用所有 plan 的 avg execution cost。也可以根据需要采用带权重的 cost 计算方式。
 
 ![](20240422232225.png)
-Plan Stitch 整体架构如上图所示，plan stitch 作为 sql server 优化器的一个扩展组件，使用 sql server 已有的 query store 功能存储历史 plan、获取算子级别的 execution cost 等信息，通过 plan guide、USE PLAN hint 等功能 force 优化器采用 stitched plan。
+Plan Stitch 整体架构如上图所示，plan stitch 实现为优化器的扩展组件，可以是外部服务，也可以是后台线程。输入为用户的 query、存储在 execution data repo 中（sql server 的 query store）的历史 plan、算子级的 execution cost 等信息，以及存储在 metadata 中的 schema、index 等信息。输出为加上 hint 后的 query，也就是论文所说的 “stitched plan”。
 
-从测试结果来看 plan stitch 在广度上能比 RBPC 优化更多的 query，在深度上能大幅减少 query 的 execution cost：经过 RBPC 优化后的查询中，83% 都能经过 plan stitch 进一步优化，减少至少 10% 的 execution cost，甚至有些 query 能减少 2 个数量级的 execution cost。同时，plan stitch 能使用 invalid plan 的 subplan，能优化的 plan 是 RBPC 的 20 倍。
+任何时候，只要 execution data repo 中发现该 query 拥有多个历史 plan 和对应的 execution statistics 就可以为其计算 stitched plan，然后将 stitched plan 交给优化器，通过现有的 RBPC 机制（比如 sql server 的 APC、oracle 的 SPM）来决定是使用当前优化器实时优化出来的 plan 还是这个 stitched plan。
 
-## Plan Stitch 搜索空间
+plan stitch 依赖 execution data 计算 execution cost，为了确保代价估算的准确度，这些历史上的 execution data 需要保持一定的新鲜度。和直方图、ndv 这些统计信息一样，在表的数据量、数据分布发生变化后也需要淘汰过期的 execution plan 和他们的 execution data，和统计信息的更新机制一样有很多启发式机制可以参考。
 
-## Plan Stitch 代价估算
+对于参数化的 sql 或者 prepare 语句，plan stitch 和 RBPC 一样存储和使用所有 plan 的 avg execution cost，也可以根据需要采用带权重的 cost 计算方式。
 
-## Plan Stitch 搜索算法
+## 构造搜索空间
+
+plan stitch 需要被限制在所有历史 plan 的 subplan 组成的搜索空间中，要根据一堆历史 physical plan 逆向构造出这个搜索空间有两个难点：一个是如何判断出两个 subplan 相等，一个是如何 encode 这个搜索空间。
+
+判断 subplan 相等采用的方法和物化视图、公共子表达式优化等类似的启发式方法。然后采用了类似 volcano/cascades planner 的方式把整个搜索空间 encode 成了论文中提出的 AND-OR graph。对照 volcano/cascades planner 来看的话，整个搜索空间其实就是由 expression group 和其中的 expression 构成。文中每个 or node 代表一个 logical plan + required physical property，每个 child and node 代表能满足该 required physical property 的 physical plan。不难看出，每个 or node 的 child 一定是 and node，而 and node 的 child 也一定是 or node。
+
+构造这个 AND-OR graph 的方法比较简单直接：对每个 physical plan（图中的 AND node），从所有历史 plan 中找出和它等价的 subplan（也是 physical plan，图中的 AND node），然后为所有这些 AND node 构造一个 OR node，代表这组相同的 physical plan 对应的 logical plan 和 physical property。
+
+plan 的 leaf node 代表了某个表的 access path，如果这个 access path 使用了被 drop 的索引，那么在构造这个 AND-OR graph 时就不能把这个 leaf node 加入进去，确保基于 AND-OR graph 搜索出来的 stitched plan 的有效性。一个 AND-OR graph 的例子如下图所示：
+![](20240426000141.png)
+
+## Bottom-up 的搜索方式
+
+Plan Stitch 和 System R 一样采用 bottom up 的方式搜索 stitched plan：自底向上为每个 or node 计算出 execution cost 最低的 stitched subplan，直到最后计算出根节点 or node 的 stitched plan。整个搜索算法的伪代码如下所示：
 
 ![](20240422232440.png)
-如上图所示，Plan Stitch 的搜索算法和 System R 优化器的搜索算法非常相似
-## 实现细节
+
+搜索时需要估算 stitched subplan 的 cost，文中采用的方法如下，stitchedSubUnitCost 是用来为 op（physical subplan）估算 cost 的函数，它依赖的输入有 4 个：
+1. opCost：observed execution cost，根据历史 plan 中该算子的 execution cost 计算而来
+2. execCount：该算子在原 plan 中被执行的次数，一般来说都是 1，除非它是原 plan 中 Nested Loop Join 或 Apply（Hyper 中也叫 Dependent Join，用来做计算子查询的算子）的 inner 端
+3. childSubUnitCost：child stitched subplan 的 cost
+4. childExecCount：child subplan 被执行的次数
+
+整体来看和普通优化器的 cost model 差不太多，只不过 cost 换成了 execution cost 而不是根据直方图、ndv 等估算，每个算子应该都需要根据自己的计算逻辑和这些输入信息计算最终的 cost。
+
+![](20240426085112.png)
 
 ## 实验结果
 
+![](20240427085429.png)
+
+上图是 plan stitch 相比 RBPC 带来的性能提升和性能 regression。作者根据 TPC-DS 和 3 个 customer workload 设计了测试用例。图 4-7 展示了 plan stitch 相比 RPBC 减少的 cpu time 百分比，计算方式为 `100*(cpu_time_stitched-cpu_time_rbpc)/cpu_time_rbpc`。
+
+图 8 展示了因为估算误差导致 stitched plan 相比 RBPC 出现性能回退的 query 占比，作者只提了回退至少 10% 的 query 的占比低于 2.7%，但是没有提这 2.7% 的 query 里面最差的回退有多少，如果要实际使用 stitched plan 还是得多测试，除了关注回退数量也关注下最差的回退情况。
+
+原文第 5 结  “EXPERIMENT” 从各个方面对 plan stitch 进行测试评估，这篇文章就不再详细介绍了，感兴趣的朋友可以自行阅读：
+
+> - **Plan Quality (Section 5.2)**. How much improvement in plan execution cost does Plan Stitch bring compared to RBPC? How much is the risk of plan regression using Plan Stitch?   
+> - **Cost Estimation (Section 5.3)**. How accurate is the stitched plan’s estimated execution cost compared to true execution cost?
+> - **Coverage (Section 5.4)**. How many queries and plans can Plan Stitch improve?
+> - **Overhead (Section 5.5)**. What is the overhead of Plan Stitch?
+> - **Stitched Plan Analysis (Section 5.6)**. How different is the stitched plan compared to the optimizer’s plan? How many previously-executed plans are used for the stitched plan? Why does the optimizer miss the cheaper stitched plan in its optimization?
+> - **Parameterized Queries (Section 5.7)**. How much does Plan Stitch improve in aggregated execution cost of query instances?
+> - **Data Changes (Section 5.8)**. How much does cost estimation in Plan Stitch degrade when data changes?
+
+## 总结
+
+总的来说，在保证 plan 稳定性的前提下尽可能提升执行性能，plan stitch 这种基于历史同时限制搜索空间的方法是个非常值得借鉴的思路。
