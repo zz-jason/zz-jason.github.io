@@ -4,8 +4,8 @@ date: 2023-07-01T00:00:00Z
 categories: ["MySQL", "Query Optimization"]
 ---
 
-![](featured.jpeg)
-
+![featured.jpg](featured.jpg)
+> 乌孙古道，2023
 ## 简介
 
 MySQL 查询优化是一个非常复杂的过程，本文以 TPC-H Q4 为例，通过 optimizer trace 尽量系统性的总结 MySQL 8.0.31 查询优化过程，方便将来了解 MySQL 查询优化细节能够按图索骥。

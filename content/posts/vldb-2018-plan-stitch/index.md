@@ -6,7 +6,7 @@ categories:
   - Query Optimization
 ---
 ![featured.jpg](featured.jpg)
-> ACT Day 2
+> 那玛峰，2023
 ## 简介
 
 通常商用数据库都有 reversion-based plan correction（RBPC）机制来避免 plan regression，比如 SQL Server APC、Oracle SPM 等：从执行过的 plan 中挑出 execution cost 最低的，强制优化器使用该 plan 以避免 regression。

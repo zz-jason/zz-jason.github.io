@@ -4,7 +4,8 @@ date: 2023-04-07T00:00:00Z
 categories: ["Paper Reading", "MVCC"]
 draft: false
 ---
-
+![featured.jpg](featured.jpg)
+> 夏特古道，2023
 ## 简介
 
 这篇论文主要讲了 Umbra（TUM 实现的 larger-than-RAM 数据库）的高性能 MVCC 实现。作者将事务分为两类，一类是数据修改量不大可以在内存中完成的常规事务，一类是需要修改大量数据的 bulk operation（比如 bulk load）。作者提出了将所有老版本数据存储在内存的 MVCC 实现方案，可以极大加速常规事务的执行。同时也给出了一种应对 bulk operation 的事务执行策略。

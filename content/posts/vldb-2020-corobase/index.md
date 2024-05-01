@@ -5,9 +5,8 @@ categories: ["Paper Reading", "Memory Database", "CPU Prefetch"]
 draft: false
 ---
 
-![](featured.jpg)
-> 官厅水库的绝美晚霞，更多照片见这条 [小红书笔记](http://xhslink.com/xj2VCs)
-
+![featured.jpg](featured.jpg)
+> 乌孙古道，2023
 ## Introduction
 
 这篇论文中，作者利用 C++ 20 引入的 coroutine 特性将 thread-to-transaction 的执行模型改为 2-level coroutine-to-transaction，并在此基础上实现了基于协程的 software prefetch 机制，减少了后续计算的 cache miss，提升了事务的整体执行性能。相比已有的 group prefetching、software pipelined prefetching 以及 asynchronous memory access chaining (AMAC) 这三种 software prefetch 来说，基于协程的 software prefetch 不需要过多的修改数据结构的接口和内部实现，在代码实现和性能收益之间做了非常不错的平衡，对数据库或高并发系统性能优化有一定的参考价值。

@@ -4,7 +4,8 @@ date: 2023-04-09T00:00:00Z
 categories: ["Paper Reading", "Logging & Recoverying"]
 draft: false
 ---
-
+![featured.jpg](featured.jpg)
+> 夏特古道，2023
 ## 简介
 
 基于磁盘的 DBMS 通常采用 ARIES 风格的日志恢复机制，它可以处理超过内存的数据和事务，可以在多次崩溃的情况下快速恢复，支持 fuzzy checkpoint 等。然而，ARIES 的中心化日志模块开销很高，不能在现代多核 CPU 上扩展。这篇论文提出适用于多核 CPU 和高性能存储的日志恢复算法。作者扩展了《[Scalable Logging through Emerging Non-Volatile Memory](http://www.vldb.org/pvldb/vol7/p865-wang.pdf)》中的 scalable logging 机制，实现了 continuous checkpoint、高效的页面分配和跨日志文件的 commit 优化。其性能与内存数据库相当。

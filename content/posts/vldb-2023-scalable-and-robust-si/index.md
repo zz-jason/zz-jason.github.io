@@ -3,7 +3,8 @@ title: "[VLDB 2023] Scalable and Robust Snapshot Isolation for High-Performance 
 date: 2023-05-24T00:00:00Z
 categories: ["Paper Reading", "MVCC"]
 ---
-
+![featured.jpg](featured.jpg)
+> 夏特古道，2023
 ## 简介
 
 这篇论文提出了一种能够避免 long-running OLAP query 影响 OLTP 事务、在多核 CPU 上 scale、支持 out-of-memory workload 的 MVCC 实现机制。

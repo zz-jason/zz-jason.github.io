@@ -1,20 +1,20 @@
 ---
 title: "[VLDB 2023] What Modern NVMe Storage Can Do, And How To Exploit It: High-Performance I/O for High-Performance Storage Engines"
-date: 2023-08-04T00:00:00Z
+date: 2024-04-29T00:00:00Z
 categories:
   - Paper Reading
   - Storage
-draft: true
+draft: false
 ---
-
-![](featured.jpg)
-
-> 2023-07-30，鸡鸣驿，据说这里也是大话西游取景地
+![featured.jpg](featured.jpg)
+> 那玛峰，2023
 ## 简介
 
 这是 LeanStore 新的一篇 VLDB 论文，它在 LeanStore 的基础上继续优化，使其充分能够利用多块 NVMe SSD 的 IOPS 和带宽，提供尽可能高的读写吞吐。LeanStore 主要设计来面向 out-of-memory 的工作负载，它能充分利用 NVMe SSD 的 IOPS 和读写带宽，相比纯内存数据库来说性能差不多，同时在存储成本上又比内存便宜许多，对于那些需要极强单机性能的应用场景来说，是个非常不错的数据库选择。LeanStore 的相关介绍可以参考 《LeanStore: In-Memory Data Management beyond Main Memory》这篇论文，或者我之前写的一篇论文笔记：《[\[ICDE 2018\] LeanStore: In-Memory Data Management Beyond Main Memory](https://zhuanlan.zhihu.com/p/619669465)》
 
 这篇论文对 LeanStore 的代码改造和架构变化并不是特别的多。最主要的贡献，一方面是讨论了如何充分发挥多块 SSD 磁盘性能的最佳实践，比如 Page Size 调整成 4KB，使用 SPDK，使用 user-threads 或者 coroutine 等。然后展示了从处理用户请求，到 Buffer Manager 内存管理，再到磁盘 IO 操作各个环节如何充分发挥多核 CPU 的并行能力，如何降低系统调用开销，最终把瓶颈落回到 SSD 上的技术方案。
+
+![](20240428081401.png)
 
 ## What Modern NVMe Storage Can Do
 
@@ -23,13 +23,13 @@ draft: true
 
 ![](fig-2.png)
 
-单块 PM1733 SSD 在 4KB 数据块的随机读 IOPS 能够达到 1.5M，8 块这样的 SSD 总的 IOPS 能够达到 12M，也就是 1200 万的 IOPS。作者的测试发现，总的 IOPS 随着 SSD 的数量是线性提升的，实测下来 8 块 SSD 的总 IOPS 比官方说明的 12M 还要多，达到了 12.5M
+**随机读**：单块 PM1733 SSD 在 4KB 数据块的随机读 IOPS 能够达到 1.5M，8 块这样的 SSD 总的 IOPS 能够达到 12M，也就是 1200 万的 IOPS。作者的测试发现，总的 IOPS 随着 SSD 的数量是线性提升的，实测下来 8 块 SSD 的总 IOPS 比官方说明的 12M 还要多，达到了 12.5M
 
-事务工作负载通常包含大量写入，而 SSD 的读写速度又是非均衡的，因此作者进行了 SSD 的读写混合测试，上图 b 展示了这些 SSD 的总 IOPS 随着读比例的提升而提升。
+**读写混合**：事务工作负载通常包含大量写入，而 SSD 的读写速度又是非均衡的，因此作者进行了 SSD 的读写混合测试，上图 b 展示了这些 SSD 的总 IOPS 随着读比例的提升而提升。
 
 ### The Case for 4KB Pages
 
-和 PMEM 不同，读写 SSD 通常以 Page 为粒度，Page Size 的选择非常关键。许多数据库系统都使用比较大的 Page Size，比如 PG、SQL Server、Shore-MT 等采用 8KB Page，MySQL 使用 16KB 的 Page，WiredTiger 更是采用了 32KB 的 Page。在之前的 LeanStore 工作中，作者发现采用 16KB 的 Page 更有利于 in-memory 的工作负载，因此 LeanStore 一开始的 Page 也是 16KB。更大的 Page Size 还有一个好处是能够减少 Buffer Pool 中的 Page Entry，降低缓存维护负担。但 Page Size 过大带来的坏处是 IO 放大，比如 16KB Page 配置下，读写 100KB 的数据引起的放大是 16KB/100=160 倍，而如果采用 4KB 的 Page 配置，读写放大就能降低为原来的 1/4，也就是 40 倍。
+和 PMEM 不同，读写 SSD 通常以 Page 为粒度，Page Size 的选择非常关键。许多数据库系统都使用比较大的 Page Size，比如 PG、SQL Server、Shore-MT 等采用 8KB Page，MySQL 使用 16KB 的 Page，WiredTiger 更是采用了 32KB 的 Page。在之前的 LeanStore 工作中，作者发现采用 16KB 的 Page 更有利于 in-memory 的工作负载，因此 LeanStore 一开始的 Page 也是 16KB。更大的 Page Size 还有一个好处是能够减少 Buffer Pool 中的 Page Entry，降低缓存维护负担。但 Page Size 过大带来的坏处是 IO 放大，比如 16KB Page 配置下，读写 100B 的数据引起的放大是 16KB/100=160 倍，而如果采用 4KB 的 Page 配置，读写放大就能降低为原来的 1/4，也就是 40 倍。
 
 ![](fig-3.png)
 
@@ -43,7 +43,7 @@ draft: true
 
 SSD 是个内部高度并行化的设备，拥有多个 channel 连接到不同的闪存颗粒上同时进行数据读写。SSD 随机读延迟在 100us 级别，采用同步 IO 只能获得 10K 的 IOPS，要想充分利用 SSD 内部的并行 IO，需要使用异步 IO 发送尽可能多的 IO 请求给 SSD。从上图作者的测试结果来看，当同时处理 1000 个 IO 请求时能够获得非常不错的 IOPS，当同时处理 3000 个 IO 请求时才能完全发挥这 8 块 NVMe SSD 的 IOPS。
 
-对于数据库系统来说，最大的一个挑战就是如何管理这么高的 IO 请求。
+对于数据库系统来说，最大的一个挑战就是如何管理这么高并发的 IO 请求。
 
 ### I/O Interfaces
 
@@ -54,6 +54,8 @@ SSD 是个内部高度并行化的设备，拥有多个 channel 连接到不同�
 在这些 IO 接口中，SPDK 拥有最好的性能和 CPU 消耗。SPDK 会直接在用户态分配 NVMe 的 submission 和 completion queue，它不支持中断，用户程序需要从 completion queue 中 poll 相关事件以完成 IO 请求，它完全 bypass 了操作系统内核，包括文件系统和 page cache 等。从作者的实验结果来看，SPDK 拥有最好的 IO 性能，能以最小的 CPU 消耗达到 SSD 的 IOPS 瓶颈。
 
 ### A Tight CPU Budget
+
+打满 12M 的 IOPS 对 CPU 的消耗也很高，按照作者使用的 AMD 2.5GHz 64 核 CPU 来算，平均每 13K 个时钟周期就需要处理一个 IO 请求。
 
 我们要到达的 IOPS 目标很高，但是可用的 CPU 资源却非常有限。作者采用的 AMD CPU 是 2.5GHz 64 核的，算下来要达到 12M 的 IOPS，平均每个 IO 只有约 13k 的 CPU 时钟周期。
 

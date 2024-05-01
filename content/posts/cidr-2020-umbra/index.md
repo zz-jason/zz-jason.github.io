@@ -4,7 +4,7 @@ date: 2023-04-01T08:00:00Z
 categories: ["Paper Reading"]
 ---
 
-![](featured.jpg)
+![](posts/cidr-2020-umbra/featured.jpg)
 > 本文封面图片来自 [自然摄影师雷雨](https://space.bilibili.com/470226708/)
 
 ## 简介

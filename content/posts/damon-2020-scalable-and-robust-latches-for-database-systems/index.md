@@ -3,7 +3,8 @@ title: "[DaMoN 2020] Scalable and Robust Latches for Database Systems"
 date: 2023-04-24T00:00:00Z
 categories: ["Paper Reading", "Latch"]
 ---
-
+![featured.jpg](featured.jpg)
+> 夏特古道，2023
 ## Introduction
 
 这篇论文不长，主要介绍了 TUM 为 Umbra 实现的 Hybrid Lock，它能同时提供乐观和悲观的上锁方式，通过在不同场景中使用不同的上锁方式来获取更高的性能。本文主要描述 Hybrid Lock 的原理和实现，论文中对其他锁的讨论对我们理解并发和锁也很有启发意义，建议感兴趣的朋友阅读一下原论文：《[Scalable and Robust Latches for Database Systems](https://db.in.tum.de/~boettcher/locking.pdf)》

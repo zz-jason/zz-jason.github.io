@@ -4,9 +4,9 @@ date: 2023-05-28T00:00:00Z
 categories: ["Paper Reading", "Join Reorder"]
 ---
 
-![](featured.png)
+![](featured.jpg)
 
-> 本文封面图片来自 [自然摄影师雷雨](https://space.bilibili.com/470226708/)
+> 天堂湖，乌孙古道，2023
 
 ## INTRODUCTION
 
