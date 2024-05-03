@@ -1,12 +1,12 @@
 ---
 title: "[MongoDB] 存储引擎接口"
-date: 2024-03-19T00:00:00Z
+date: 2024-05-03T00:00:00Z
 categories:
   - MongoDB
   - Storage
 draft: true
 ---
-![](posts/mongo-storage-api/featured.jpg)
+
 
 ## How to compile
 
@@ -63,7 +63,7 @@ nohup ./mongod --dbpath /tmp/mongodb --port 27017 --storageEngine yourStorageEng
 1. 添加一个内存中的存储引擎，数据全部存储在 `std::unordered_map<std::string, std::string>` 中，该存储引擎名字叫做 “yastore”，yet another storage 的简称
 2. 能够跑通基本的 CURD
 
-目前只知道需要实现 KVEngine 和 RecordStore 两个接口，但还有许多信息未知，比如 mongodb 如何使用新存储引擎启动，如何将 CURD 操作路由到新存储引擎中等，这些问题我们将通过不断的实验和 debug 来一步步来发现解决。
+目前只知道需要实现 KVEngine 和 RecordStore 两个接口，但还有许多信息未知，比如 mongodb 如何使用新存储引擎启动，如何将 CURD 操作路由到新存储引擎中等，这些问题我们将通过不断的实验和 debug 来发现和解决。
 
 ### 1. 使用新存储引擎启动 MongoDB
 
