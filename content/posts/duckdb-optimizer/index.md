@@ -6,6 +6,10 @@ categories:
   - Query Optimization
 draft: false
 ---
+
+![featured.jpg](featured.jpg)
+> Glacier, Tilicho Lake, Annapurna, 2024
+
 ## 简介
 
 本文以目前 DuckDB main 分支最新代码（commit: [670cd34](https://github.com/duckdb/duckdb/tree/670cd341249e266de384e0341f200f4864b41b27)）为例，介绍 DuckDB 查询优化的整体过程和部分细节。
