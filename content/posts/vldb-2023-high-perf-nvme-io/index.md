@@ -4,64 +4,79 @@ date: 2024-04-29T00:00:00Z
 categories:
   - Paper Reading
   - Storage
-draft: false
+draft: true
 ---
 ![featured.jpg](featured.jpg)
 > 那玛峰，2023
-## 简介
 
-这是 LeanStore 新的一篇 VLDB 论文，它在 LeanStore 的基础上继续优化，使其充分能够利用多块 NVMe SSD 的 IOPS 和带宽，提供尽可能高的读写吞吐。LeanStore 主要设计来面向 out-of-memory 的工作负载，它能充分利用 NVMe SSD 的 IOPS 和读写带宽，相比纯内存数据库来说性能差不多，同时在存储成本上又比内存便宜许多，对于那些需要极强单机性能的应用场景来说，是个非常不错的数据库选择。LeanStore 的相关介绍可以参考 《LeanStore: In-Memory Data Management beyond Main Memory》这篇论文，或者我之前写的一篇论文笔记：《[\[ICDE 2018\] LeanStore: In-Memory Data Management Beyond Main Memory](https://zhuanlan.zhihu.com/p/619669465)》
+## Introduction
 
-这篇论文对 LeanStore 的代码改造和架构变化并不是特别的多。最主要的贡献，一方面是讨论了如何充分发挥多块 SSD 磁盘性能的最佳实践，比如 Page Size 调整成 4KB，使用 SPDK，使用 user-threads 或者 coroutine 等。然后展示了从处理用户请求，到 Buffer Manager 内存管理，再到磁盘 IO 操作各个环节如何充分发挥多核 CPU 的并行能力，如何降低系统调用开销，最终把瓶颈落回到 SSD 上的技术方案。
+闪存的吞吐很高并且还在逐年提升：一块 PCIe 4.0 SSD 的随机读 IOPS 已经可以达到上百万了，总带宽 7GB/s，而新一代 PCIe 5.0 SSD 的带宽更是可以达到快要接近内存的 12GB/s。
+
+闪存的价格不贵并且越来越便宜，目前企业级 SSD 可以实现 $200/TB 的价格，比内存便宜 10-50 倍。如下表所示，假设总共有 $15000 的预算，一半用来配置 64 核 CPU、512GB 内存，剩下的预算可以用来加 2TB 内存，或者加 8 块 4TB 的 PCIe 4.0 NVMe SSD 以实现更大的系统容量。作者相信，随着 Optane 的商业失败，将来 SSD 在数据存储方面会发挥越来越大的作用，成为 cost-efficient 的唯一选择。
+
+![](20240520004101.png)
+
+虽然可以配置多块 SSD 实现更大存储容量，但现有存储引擎设计并不能充分发挥这些 SSD 的 IOPS 和带宽。作者测试了 5 个系统的随机读，总数据量 100GB，buffer pool 为 10GB，测试环境采用 64 核 AMD CPU，512G 内存，8 块三星 PM1733 SSD。对于 4KB 随机读，每块 SSD 可以达到 1.5M IOPS，8 块 SSD 的 IOPS 上限为 12M。下图是实际测试结果，即使表现最好的 LeanStore 距离理论上限也还有 3.5 倍的差距：
 
 ![](20240428081401.png)
 
+对一组 NVMe SSD 来说，怎样才能达到硬件规格所描述的性能上限，应该使用什么 IO API，pread/pwrite、libaio、io_uring 还是 SPDK？既要减少 IO 放大又要高性能，Buffer pool 中的 page size 应该是多大？如何进行并发控制以达到几百万的 IOPS？如何提升存储引擎性能使其管理几百万的 IOPS？使用专门的 IO 线程池还是每个前端工作线程各自进行 IO？
+
+以上这些问题就是这篇论文希望回答和解决的。作者讨论了 NVMe 闪存的硬件特点，针对这些特点重新设计 LeanStore 使其在多块 SSD 的场景下能够达到 IOPS 的硬件规格上限。
+
 ## What Modern NVMe Storage Can Do
 
-作者这里采用三星 PM1733 SSD 做了许多基础测试以评估如何达到这些 SSD 的理论 IOPS 和带宽。总共 8 块 NVMe SSD，内存数据 10GB，磁盘数据 100GB。
+这里作者通过一些 micro benchmark 解释了 NVMe SSD 的硬件特性和如何充分发挥其性能。所有实验都基于 64 核 AMD zen4 CPU + 8 块三星 PM1733 SSD。
 ### Drive Scalability
 
 ![](fig-2.png)
 
-**随机读**：单块 PM1733 SSD 在 4KB 数据块的随机读 IOPS 能够达到 1.5M，8 块这样的 SSD 总的 IOPS 能够达到 12M，也就是 1200 万的 IOPS。作者的测试发现，总的 IOPS 随着 SSD 的数量是线性提升的，实测下来 8 块 SSD 的总 IOPS 比官方说明的 12M 还要多，达到了 12.5M
-
-**读写混合**：事务工作负载通常包含大量写入，而 SSD 的读写速度又是非均衡的，因此作者进行了 SSD 的读写混合测试，上图 b 展示了这些 SSD 的总 IOPS 随着读比例的提升而提升。
+作者测了 4KB 随机读和读写混合的场景，读写混合负载和事务更接近些，完全随机写的情况下 8 块 SSD 的总 IOPS 为 4.7M，读请求占 90% 时总 IOPS 能提升到 8.9M，完全随机读的情况下总 IOPS 能达到 12.5M。
 
 ### The Case for 4KB Pages
 
-和 PMEM 不同，读写 SSD 通常以 Page 为粒度，Page Size 的选择非常关键。许多数据库系统都使用比较大的 Page Size，比如 PG、SQL Server、Shore-MT 等采用 8KB Page，MySQL 使用 16KB 的 Page，WiredTiger 更是采用了 32KB 的 Page。在之前的 LeanStore 工作中，作者发现采用 16KB 的 Page 更有利于 in-memory 的工作负载，因此 LeanStore 一开始的 Page 也是 16KB。更大的 Page Size 还有一个好处是能够减少 Buffer Pool 中的 Page Entry，降低缓存维护负担。但 Page Size 过大带来的坏处是 IO 放大，比如 16KB Page 配置下，读写 100B 的数据引起的放大是 16KB/100=160 倍，而如果采用 4KB 的 Page 配置，读写放大就能降低为原来的 1/4，也就是 40 倍。
-
 ![](fig-3.png)
 
-如上图所示,作者测试发现，对于 SSD 来说最佳的 Page Size 应该是 4KB，在这样的配置下它们能够提供最高的随机读 IOPS 和最低的延迟，同时也能尽可能打满 SSD 的读写带宽。
+对数据库来说 page size 的选择很重要，许多数据库的 page size 都比 4KB 更大，比如 PG、SQL Server 采用 8KB，MySQL 采用 16KB，WiredTiger 采用了 32KB。更大的 page size 对 in-memory 的工作负载更有利（比如减少 B+ 树的高度），也能减少 buffer pool 的 page 数量降低缓存维护负担。但 page size 过大的坏处是 IO 放大。
 
-不过因为大多现有数据库的瓶颈不在 IOPS 上，仅仅将 Page Size 设置为 4KB 并不能立马看到收益，还需要配合其他优化才行。
+如上所示，作者在 page size 下进行了随机读测试，结果表明 4KB 的 IO 粒度能最大化 IOPS 和带宽，IO 延迟也最低。page size 小于或大于 4KB 性能都会下降。因此为了充分发挥磁盘性能，最佳 page size 应该是 4KB。
+
+不过接下来我们会看到，仅将 page size 调整为 4KB 还远远不够。
 
 ### SSD Parallelism
 
 ![](fig-4.png)
 
-SSD 是个内部高度并行化的设备，拥有多个 channel 连接到不同的闪存颗粒上同时进行数据读写。SSD 随机读延迟在 100us 级别，采用同步 IO 只能获得 10K 的 IOPS，要想充分利用 SSD 内部的并行 IO，需要使用异步 IO 发送尽可能多的 IO 请求给 SSD。从上图作者的测试结果来看，当同时处理 1000 个 IO 请求时能够获得非常不错的 IOPS，当同时处理 3000 个 IO 请求时才能完全发挥这 8 块 NVMe SSD 的 IOPS。
+SSD 是个内部高度并行化的设备，有多个数据通道同时读写。它的随机读延迟在 100us 级别，一次一个 page 的同步 IO 只能获得 10K IOPS，也就是 40MB/s 的带宽，距离单盘 1.5M IOPS 的上限相去甚远。
 
-对于数据库系统来说，最大的一个挑战就是如何管理这么高并发的 IO 请求。
+如上图所示，作者测试了这 8 快盘在不同 IO depth 下的随机读 IOPS。当 IO depth 为 1000 时才获得比较不错的性能，当 IO depth 为 3000 时才达到极限 IOPS，也就是需要 3000 并发的 IO 请求才能打满所有这些盘的 IOPS。
+
+要在数据库中实现和管理这 3000 的并发 IO 是个非常挑战的事情。
 
 ### I/O Interfaces
 
 ![](fig-5.png)
 
-作者讨论了 4 个 Linux 上常用的 IO 库：POSIX pread/pwrite、libaio、io_uring 以及 SPDK。不管使用哪个库，在 NVMe SSD 上读写数据的最终过程都是将用户的 IO 请求发送给 NVMe 的 submission queue 中，当读写请求处理完后，会将这些事件信息发送到 completion queue 中，并根据需要进行中断处理。这里不会过多介绍前面几种 IO 接口，感兴趣的朋友可以阅读查阅相关文献了解更详细的信息。
+作者讨论了 4 个 Linux 上常用的 IO 库：POSIX pread/pwrite、libaio、io_uring 以及 SPDK。不管使用哪个库，在 NVMe SSD 上读写数据的最终过程都是将用户的 IO 请求发给 NVMe 的 submission queue，SSD 处理完请求后会将 completion event 发送到 completion queue，通知上层 IO 已完成。
 
-在这些 IO 接口中，SPDK 拥有最好的性能和 CPU 消耗。SPDK 会直接在用户态分配 NVMe 的 submission 和 completion queue，它不支持中断，用户程序需要从 completion queue 中 poll 相关事件以完成 IO 请求，它完全 bypass 了操作系统内核，包括文件系统和 page cache 等。从作者的实验结果来看，SPDK 拥有最好的 IO 性能，能以最小的 CPU 消耗达到 SSD 的 IOPS 瓶颈。
+POSIX 接口：使用 pread/pwrite 一次处理一个 IO 请求，是一种同步接口，IO 未完成时会被阻塞，每个 IO 请求都会产生 context switch 和系统调用。
+
+libaio：一种异步接口，一次 io_submit() 系统调用可以提交多个 IO 请求，IO 处理不阻塞用户程序，用户通过 get_events() 获取 completion events 来判断之前提交的 IO 请求是否已经完成。降低了系统调用和 context switch，单个线程内可以同时处理多个 IO 请求。
+
+io_uring：在用户态和内核态之间有一组共享的 submission/completion queue（图 C 蓝色部分），用户通过 io_uring_enter() 提交请求，内核的处理过程和其他接口一样各个 layer 都要走一遍，直到最后把用户的 IO 请求提交到 SSD 的 submission queue 中。io_uring 有一个 SQPOLL 模式，开启后会在内核中启动 kernel-worker 后台线程拉取和处理用户 submission queue（图 C 蓝色部分）中的 IO 请求。SQPOLL 模式下不需要任何系统调用。
+
+在这些 IO 接口中，SPDK 拥有最好的性能和最低的 CPU 消耗。SPDK 会直接在用户态分配 NVMe 的 submission 和 completion queue，它不支持中断，用户程序需要从 completion queue 中 poll 相关事件以完成 IO 请求，完全 bypass 了操作系统内核，包括文件系统和 page cache 等。从实验结果来看，SPDK 效果最好，能以最小的 CPU 开销达到极限 IOPS。
 
 ### A Tight CPU Budget
+
+![](fig-6.png)
 
 打满 12M 的 IOPS 对 CPU 的消耗也很高，按照作者使用的 AMD 2.5GHz 64 核 CPU 来算，平均每 13K 个时钟周期就需要处理一个 IO 请求。
 
 我们要到达的 IOPS 目标很高，但是可用的 CPU 资源却非常有限。作者采用的 AMD CPU 是 2.5GHz 64 核的，算下来要达到 12M 的 IOPS，平均每个 IO 只有约 13k 的 CPU 时钟周期。
 
 作者使用 fio 测试的过程中，发现 fio 因为使用了基于中断的 IO 接口，它并不能打满这些 SSD 的总 IOPS。这也从侧面说明了数据库系统要想充分利用多块 SSD 提供的 IO 能力有多么困难。
-
-![](fig-6.png)
 
 如上图所示，使用 io_uring 需要 32 线程才能打满这些 SSD 的 IOPS，而使用 SPDK 只需要 3 个线程。如果不用 SPDK 那么至少一半的 CPU 时钟周期都需要花费在 IO 请求上，
 剩下一半的时钟周期留给了数据库其他操作比如查询处理、索引遍历、并发控制、WAL、Buffer Manager 等显然是不够的，SPDK 成了打满磁盘 IOPS 的必选项。

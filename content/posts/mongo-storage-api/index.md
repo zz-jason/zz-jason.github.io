@@ -95,7 +95,21 @@ StorageEngine::Factory* getFactoryForStorageEngine(ServiceContext* service, Stri
 
 ![](20240417230214.png)
 
-模仿 wiredtiger，我们创建一个 `storage/yastore` 目录，并在里面创建一个 yastore_init.cpp 文件，实现 `YaStoreFactory`，然后调用 `registerStorageEngine()` 函数将其注册给 MongoDB
+模仿 wiredtiger，我们创建一个 `storage/yastore` 目录，并在里面创建一个 yastore_init.cpp 文件，实现 `YaStoreFactory`，然后调用 `registerStorageEngine()` 函数将其注册给 MongoDB。其中 `getCanonicalName()` 需要返回该 store 唯一的名字，不要与已有 store 重名。
+
+之后重新运行，发现了一个新的 segmentation fault：
+![](20240519110013.png)
+
+查了下代码，这里 mongodb 在初始化的过程中使用该 Engine 创建的 recovery unit 进行 fail recovery，也就是上面堆栈中 `loadCatalog()` 函数：
+
+![](20240519114007.png)
+
+我们需要实现 StorageEngine 的 `newRecoveryUnit()` 接口使其返回某个 `RecoveryUnit`，暂时先返回 `RecoveryUnitNoop` ，看看后面会遇到啥问题。
+
+还是在 `loadCatalog()` 中，这次是 core 在 createRecordStore 上了：
+![](20240519114901.png)
+l
+
 
 ### 2. 实现 `YaStoreFactory`
 
