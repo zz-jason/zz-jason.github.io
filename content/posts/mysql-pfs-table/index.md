@@ -51,6 +51,15 @@ table_plugin_table::table_plugin_table(PFS_engine_table_share *share)
 ### index_next
 
 
+## Example: pfs_example_plugin_employee
+
+安装插件：
+```sql
+ INSTALL PLUGIN pfs_example_plugin_employee SONAME 'pfs_example_plugin_employee.so';
+```
+
+每个 pfs table 都会创建对应的 dd table，由 create_native_table_for_pfs() 完成
+
 ## Example 1: Table Scan
 
 
