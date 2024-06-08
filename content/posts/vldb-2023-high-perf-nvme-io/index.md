@@ -1,5 +1,5 @@
 ---
-title: "[VLDB 2023] What Modern NVMe Storage Can Do, And How To Exploit It: High-Performance I/O for High-Performance Storage Engines"
+title: "VLDB 2023 | What Modern NVMe Storage Can Do, And How To Exploit It: High-Performance I/O for High-Performance Storage Engines"
 date: 2024-05-28T00:00:00Z
 categories:
   - Paper Reading
